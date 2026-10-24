@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cherrybeam Coffee — dawn-roast orbit</title>
+  
+  <!-- Typography: Poppins 300, 400, 500, 600, 700, 800 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three@0.160.0/build/three.module.js",
+      "three/addons/loaders/GLTFLoader.js": "/vendor/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+      "three/addons/environments/RoomEnvironment.js": "/vendor/three@0.160.0/examples/jsm/environments/RoomEnvironment.js"
+    }
+  }
+  </script>
+
+  <style>
+    /* Design Tokens */
+    :root {
+      --ink: #071F20;
+      --spruce: #123B3A;
+      --mist: #DDE8DD;
+      --paper: #F4F0E6;
+      --muted: #476363;
+      --copper: #D47A4A;
+      --fruit: #B73945;
+      --num: #B8D7CC;
+      --num-dark: #82A7A5;
+      --line: #FFFFFF2E;
+      --line-light: #071F2026;
+      --pad: clamp(18px, 3.2vw, 46px);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: auto;
+      font-size: 16px;
+    }
+
+    body {
+      background-color: var(--mist);
+      color: var(--ink);
+      font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+      font-feature-settings: "kern" 1, "liga" 1;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      transition: background-color 500ms ease, color 500ms ease;
+    }
+
+    /* Fixed SVG static grain layer at 2.5% opacity */
+    #grain {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    }
+
+    /* Layer ordering */
+    .section-art { z-index: 0; }
+    .ornament { z-index: 1; pointer-events: none; }
+    .content-layer { z-index: 2; position: relative; }
+    #cherry { z-index: 20; position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; opacity: 0; transition: opacity 1.2s ease; }
+    #cherry.ready { opacity: 1; }
+    nav { z-index: 30; }
+    #badge { z-index: 30; }
+    #loader { z-index: 50; }
+
+    /* Loader screen */
+    #loader {
+      position: fixed;
+      inset: 0;
+      background: var(--paper);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 800ms ease, visibility 800ms ease;
+    }
+    #loader.done {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .spinner-mark {
+      width: 48px;
+      height: 48px;
+      animation: spinMark 1.6s linear infinite;
+    }
+    @keyframes spinMark {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Fixed Navigation */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 18px var(--pad) 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+      transition: color 500ms ease;
+    }
+    nav * {
+      pointer-events: auto;
+    }
+
+    .home-link {
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      color: inherit;
+    }
+    .brand-svg {
+      width: 36px;
+      height: 36px;
+      transition: transform 600ms cubic-bezier(.2, .8, .2, 1);
+    }
+    .home-link:hover .brand-svg {
+      transform: rotate(90deg);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: clamp(22px, 4.5vw, 58px);
+    }
+    .nav-anchor {
+      font-size: 15.5px;
+      font-weight: 400;
+      color: inherit;
+      text-decoration: none;
+      position: relative;
+      padding-bottom: 2px;
+      transition: color 350ms ease;
+    }
+    .nav-anchor::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 100%;
+      height: 1.5px;
+      background-color: currentColor;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 350ms ease;
+    }
+    .nav-anchor:hover::after {
+      transform: scaleX(1);
+    }
+
+    .nav-cta {
+      font-size: 16px;
+      font-weight: 600;
+      color: inherit;
+      text-decoration: none;
+      position: relative;
+      margin-right: clamp(0px, 4vw, 70px);
+      padding-bottom: 2px;
+    }
+    .nav-cta::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 100%;
+      height: 1.5px;
+      background-color: currentColor;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 350ms ease;
+    }
+    .nav-cta:hover::after {
+      transform: scaleX(1);
+    }
+
+    /* Fixed lower-right badge */
+    #badge {
+      position: fixed;
+      right: var(--pad);
+      bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink);
+      pointer-events: auto;
+      transition: color 500ms ease;
+    }
+    #badge .badge-bold {
+      font-weight: 700;
+      color: var(--copper);
+      transition: color 500ms ease;
+    }
+
+    /* Dark theme overrides */
+    body.on-dark nav {
+      color: #FFFFFF;
+    }
+    body.on-dark #badge {
+      color: #FFFFFF;
+    }
+    body.on-dark #badge .badge-bold {
+      color: #DDE8DD;
+    }
+
+    /* Section structure */
+    main > section {
+      position: relative;
+      height: 100vh;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Arrow Link */
+    .arrow-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      text-decoration: none;
+      color: inherit;
+      font-weight: 600;
+      margin-top: 40px;
+      font-size: clamp(15px, 1.4vw, 19px);
+    }
+    .chevron-box {
+      width: 25px;
+      height: 32px;
+      border: 1px solid currentColor;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 350ms ease;
+    }
+    .arrow-link:hover .chevron-box {
+      transform: translateX(4px);
+    }
+    .chevron-box svg {
+      width: 10px;
+      height: 10px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+    }
+
+    /* Giant Numerals */
+    .giant-num {
+      position: absolute;
+      font-weight: 600;
+      line-height: 0.8;
+      letter-spacing: -0.06em;
+      font-size: clamp(110px, 15vw, 250px);
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* Section 1: #top Hero */
+    #top {
+      background: linear-gradient(135deg, #F4F0E6 0%, #DDE8DD 100%);
+    }
+    .hero-wash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 55%;
+      background: rgba(244, 240, 230, 0.45);
+      pointer-events: none;
+    }
+    .hero-vignette {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 60vw;
+      height: 60vh;
+      background: radial-gradient(circle at bottom right, rgba(7, 31, 32, 0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-headline {
+      position: absolute;
+      top: 15.5vh;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-weight: 800;
+      font-size: clamp(42px, 6.25vw, 112px);
+      line-height: 1.04;
+      letter-spacing: -0.035em;
+      text-shadow: 0 0 40px #F4F0E659;
+      text-wrap: balance;
+    }
+    .line-mask {
+      overflow: hidden;
+      display: block;
+      padding-bottom: 0.06em;
+    }
+    .line-mask span {
+      display: inline-block;
+      transform: translateY(110%);
+      transition: transform 1.1s cubic-bezier(.2, .8, .15, 1);
+    }
+    body.loaded .hero-headline .line-1 span {
+      transform: translateY(0);
+    }
+    body.loaded .hero-headline .line-2 span {
+      transform: translateY(0);
+      transition-delay: 120ms;
+    }
+
+    .hero-side-block {
+      position: absolute;
+      right: clamp(24px, 6.5vw, 120px);
+      top: 59vh;
+      max-width: min(260px, 80vw);
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 1s ease 700ms, transform 1s ease 700ms;
+    }
+    body.loaded .hero-side-block {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .hero-side-text {
+      font-size: clamp(15px, 1.45vw, 20px);
+      font-weight: 400;
+      line-height: 1.32;
+      color: var(--muted);
+    }
+
+    .ornament-berry {
+      position: absolute;
+      left: -14vw;
+      bottom: -24vw;
+      width: clamp(420px, 64vw, 1100px);
+      height: auto;
+      transform-origin: 60% 40%;
+      filter: drop-shadow(0 30px 40px #071F202E);
+    }
+
+    /* Section 2: #story Chapter 01 */
+    #story {
+      background: linear-gradient(180deg, #DDE8DD 0%, #EAF0E8 100%);
+    }
+    #story .giant-num {
+      left: 6vw;
+      top: 50vh;
+      color: var(--num);
+    }
+    .story-text-block {
+      position: absolute;
+      left: 50vw;
+      top: 41vh;
+      max-width: min(520px, 44vw);
+    }
+    .story-heading {
+      font-weight: 700;
+      font-size: clamp(30px, 3.4vw, 56px);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+    }
+    .story-para {
+      margin-top: 22px;
+      font-size: clamp(13.5px, 1.05vw, 16px);
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 420px;
+    }
+    .ornament-husk {
+      position: absolute;
+      left: -9vw;
+      top: -14vw;
+      width: clamp(380px, 46vw, 820px);
+      transform-origin: 50% 0%;
+    }
+
+    /* Section 3: #guide Chapter 02 (Dark) */
+    #guide {
+      background-color: var(--spruce);
+      background-image: radial-gradient(circle at 75% 70%, rgba(212, 122, 74, 0.18) 0%, transparent 60%);
+      color: #FFFFFF;
+    }
+    .guide-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, #071F2073 0%, transparent 55%);
+      pointer-events: none;
+    }
+    #guide .giant-num {
+      color: var(--num-dark);
+      position: static;
+      margin-bottom: 22px;
+      display: block;
+    }
+    .guide-text-block {
+      position: absolute;
+      left: 6vw;
+      top: 22vh;
+      max-width: min(500px, 46vw);
+    }
+    .guide-heading {
+      font-weight: 700;
+      font-size: clamp(30px, 3.4vw, 56px);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+    }
+    .guide-para {
+      margin-top: 22px;
+      font-size: clamp(13.5px, 1.05vw, 16px);
+      line-height: 1.6;
+      color: #DDE8DDD1;
+      max-width: 460px;
+    }
+    .ornament-chaff {
+      position: absolute;
+      right: -8vw;
+      bottom: -20vw;
+      width: clamp(380px, 46vw, 820px);
+      transform-origin: 30% 30%;
+      filter: drop-shadow(0 40px 60px #071F2073);
+    }
+
+    /* Section 4: Chapter 03 */
+    #chapter-three {
+      background: linear-gradient(180deg, #EAF0E8 0%, #DDE8DD 100%);
+    }
+    #chapter-three .giant-num {
+      color: var(--num);
+      position: static;
+      margin-bottom: 24px;
+      display: block;
+    }
+    .chapter-three-text-block {
+      position: absolute;
+      left: 54vw;
+      top: 26vh;
+      max-width: min(500px, 40vw);
+    }
+    .chapter-three-heading {
+      font-weight: 700;
+      font-size: clamp(30px, 3.4vw, 56px);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+    }
+    .chapter-three-para {
+      margin-top: 22px;
+      font-size: clamp(13.5px, 1.05vw, 16px);
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 420px;
+    }
+    .ornament-branch {
+      position: absolute;
+      left: -10vw;
+      top: 6vh;
+      width: clamp(360px, 42vw, 760px);
+      transform-origin: 40% 50%;
+    }
+
+    /* Section 5: #reserve Footer */
+    #reserve {
+      background: var(--mist);
+    }
+    .reserve-cta-block {
+      position: absolute;
+      top: 18vh;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .reserve-heading {
+      font-weight: 700;
+      font-size: clamp(30px, 3.6vw, 60px);
+      letter-spacing: -0.02em;
+    }
+    .footer-brand {
+      position: absolute;
+      left: var(--pad);
+      bottom: 80px;
+    }
+    .footer-brand-title {
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-size: clamp(30px, 3vw, 46px);
+    }
+    .footer-brand-tagline {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .footer-columns {
+      position: absolute;
+      right: calc(var(--pad) + 120px);
+      bottom: 80px;
+      display: flex;
+      gap: 64px;
+    }
+    .footer-col {
+      display: flex;
+      flex-direction: column;
+    }
+    .footer-col a {
+      font-size: 14.5px;
+      font-weight: 500;
+      line-height: 1.9;
+      color: inherit;
+      text-decoration: none;
+      transition: color 250ms ease;
+    }
+    .footer-col a:hover {
+      color: var(--copper);
+    }
+
+    /* Chapter Reveal Transitions */
+    .reveal {
+      opacity: 0;
+      transform: translateY(40px);
+      transition: opacity 1s ease, transform 1.1s cubic-bezier(.2, .8, .15, 1);
+    }
+    main > section.in .reveal {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    main > section.in .reveal.d1 { transition-delay: 100ms; }
+    main > section.in .reveal.d2 { transition-delay: 220ms; }
+    main > section.in .reveal.d3 { transition-delay: 340ms; }
+
+    /* Accessibility Focus styles */
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid var(--copper);
+      outline-offset: 3px;
+    }
+
+    /* Mobile Recomposition below 760px */
+    @media (max-width: 760px) {
+      .nav-links {
+        display: none;
+      }
+      .nav-cta {
+        margin-right: 0;
+      }
+      .hero-headline {
+        top: 14vh;
+      }
+      .hero-side-block {
+        top: auto;
+        bottom: 14vh;
+        right: 18px;
+        max-width: 62vw;
+      }
+      .ornament-berry {
+        width: 110vw;
+        left: -38vw;
+        bottom: -55vw;
+      }
+      #story .giant-num {
+        left: auto;
+        right: 6vw;
+        top: 16vh;
+      }
+      .story-text-block {
+        left: 18px;
+        right: 18px;
+        top: auto;
+        bottom: 10vh;
+        max-width: none;
+      }
+      .guide-text-block {
+        left: 18px;
+        right: 18px;
+        top: 14vh;
+        max-width: none;
+      }
+      .chapter-three-text-block {
+        left: 18px;
+        right: 18px;
+        top: auto;
+        bottom: 10vh;
+        max-width: none;
+      }
+      .ornament-branch {
+        width: 90vw;
+      }
+      .footer-brand {
+        bottom: 150px;
+      }
+      .footer-columns {
+        right: 18px;
+        bottom: 150px;
+        gap: 30px;
+      }
+    }
+
+    /* Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation: none !important;
+        transition: none !important;
+      }
+      .line-mask span {
+        transform: none !important;
+      }
+      .hero-side-block, .reveal {
+        opacity: 1 !important;
+        transform: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Static SVG Grain Layer -->
+  <div id="grain" aria-hidden="true"></div>
+
+  <!-- Page Loader -->
+  <div id="loader">
+    <svg class="spinner-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="22" r="8" fill="#B73945"/>
+      <circle cx="24" cy="20" r="7.5" fill="#962A35"/>
+      <path d="M16 14C18 9 24 8 28 6" stroke="#D47A4A" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M28 6L30 10L32 6L28 6Z" fill="#D47A4A"/>
+    </svg>
+  </div>
+
+  <!-- Fixed WebGL 3D Canvas -->
+  <canvas id="cherry"></canvas>
+
+  <!-- Fixed Top Navigation -->
+  <nav>
+    <a href="#top" class="home-link" aria-label="Cherrybeam Coffee home">
+      <svg class="brand-svg" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="22" r="8" fill="#B73945"/>
+        <circle cx="24" cy="20" r="7.5" fill="#962A35"/>
+        <path d="M16 14C18 9 24 8 28 6" stroke="#D47A4A" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M28 6L30 10L32 6L28 6Z" fill="#D47A4A"/>
+      </svg>
+    </a>
+
+    <div class="nav-links">
+      <a href="#story" class="nav-anchor">From fruit to cup</a>
+      <a href="#guide" class="nav-anchor">The roast guide</a>
+    </div>
+
+    <a href="#reserve" class="nav-cta">Make a morning</a>
+  </nav>
+
+  <!-- Fixed Lower-Right Badge -->
+  <div id="badge">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="5" cy="5" r="2.5" fill="currentColor"/>
+      <circle cx="15" cy="5" r="2.5" fill="currentColor"/>
+      <circle cx="5" cy="15" r="2.5" fill="currentColor"/>
+      <circle cx="15" cy="15" r="2.5" fill="currentColor"/>
+    </svg>
+    <span>Brewed for <span class="badge-bold">Cherrybeam</span></span>
+  </div>
+
+  <main>
+    <!-- Section 1: #top Hero -->
+    <section id="top" data-theme="light">
+      <div class="hero-wash"></div>
+      <div class="hero-vignette"></div>
+
+      <!-- Headline -->
+      <h1 class="hero-headline" data-speed="0.55">
+        <span class="line-mask line-1"><span>Brew clarity into</span></span>
+        <span class="line-mask line-2"><span>the first quiet hour.</span></span>
+      </h1>
+
+      <!-- Berry Cluster Ornament -->
+      <svg class="ornament ornament-berry" data-speed="-0.25" data-rot="8" viewBox="0 0 400 300" fill="none" aria-hidden="true">
+        <ellipse cx="140" cy="160" rx="90" ry="75" fill="#B73945" opacity="0.85"/>
+        <ellipse cx="220" cy="190" rx="80" ry="70" fill="#962A35" opacity="0.8"/>
+        <ellipse cx="180" cy="110" rx="70" ry="60" fill="#D47A4A" opacity="0.4"/>
+      </svg>
+
+      <!-- Hero Side Block -->
+      <div class="hero-side-block">
+        <p class="hero-side-text">Small-lot coffee, chosen around your ritual, then roasted close to the day you open it.</p>
+        <a href="#reserve" class="arrow-link">
+          <span>Set my first pour</span>
+          <span class="chevron-box">
+            <svg viewBox="0 0 10 10"><path d="M3 1.5L6.5 5L3 8.5"/></svg>
+          </span>
+        </a>
+      </div>
+    </section>
+
+    <!-- Section 2: #story Chapter 01 -->
+    <section id="story" data-theme="light">
+      <!-- Hanging Husk Ornament -->
+      <svg class="ornament ornament-husk" data-speed="0.35" data-rot="-6" viewBox="0 0 300 200" fill="none" aria-hidden="true">
+        <path d="M20 10 C 90 80, 160 120, 240 180" stroke="#D47A4A" stroke-width="12" stroke-linecap="round" opacity="0.3"/>
+        <path d="M40 30 C 120 70, 180 140, 260 190" stroke="#B8D7CC" stroke-width="8" stroke-linecap="round" opacity="0.4"/>
+      </svg>
+
+      <span class="giant-num reveal d1">01</span>
+
+      <div class="story-text-block">
+        <h2 class="story-heading reveal d2">
+          Follow the<br>
+          fruit through<br>
+          its bright origin
+        </h2>
+        <p class="story-para reveal d3">Each bag starts with a seasonal harvest, then carries its place, process, and character straight into your grinder.</p>
+      </div>
+    </section>
+
+    <!-- Section 3: #guide Chapter 02 (Dark) -->
+    <section id="guide" data-theme="dark">
+      <div class="guide-overlay"></div>
+
+      <!-- Copper Chaff Ornament -->
+      <svg class="ornament ornament-chaff" data-speed="-0.3" data-rot="10" viewBox="0 0 350 250" fill="none" aria-hidden="true">
+        <path d="M100 200 C 180 120, 260 80, 320 30" stroke="#D47A4A" stroke-width="18" stroke-linecap="round" opacity="0.35"/>
+        <circle cx="280" cy="60" r="50" fill="#D47A4A" opacity="0.2" filter="blur(20px)"/>
+      </svg>
+
+      <div class="guide-text-block">
+        <span class="giant-num reveal d1">02</span>
+        <h2 class="guide-heading reveal d2">
+          Roast for your<br>
+          own rhythm
+        </h2>
+        <p class="guide-para reveal d3">Choose a vivid filter roast or a deeper espresso roast. We make each release easy to recognise before the first sip.</p>
+      </div>
+    </section>
+
+    <!-- Section 4: Chapter 03 -->
+    <section id="chapter-three" data-theme="light">
+      <!-- Coffee Branch Ornament -->
+      <svg class="ornament ornament-branch" data-speed="-0.2" data-rot="-10" viewBox="0 0 350 250" fill="none" aria-hidden="true">
+        <path d="M30 180 Q 150 140 280 40" stroke="#476363" stroke-width="6" stroke-linecap="round" opacity="0.25"/>
+        <ellipse cx="140" cy="140" rx="20" ry="10" fill="#B8D7CC" opacity="0.4" transform="rotate(-20 140 140)"/>
+        <ellipse cx="220" cy="90" rx="22" ry="11" fill="#B8D7CC" opacity="0.4" transform="rotate(-30 220 90)"/>
+      </svg>
+
+      <div class="chapter-three-text-block">
+        <span class="giant-num reveal d1">03</span>
+        <h2 class="chapter-three-heading reveal d2">
+          Keep your cup<br>
+          in easy motion
+        </h2>
+        <p class="chapter-three-para reveal d3">Set the pace once. We time each delivery, offer a useful tasting note, and leave the rest of your morning alone.</p>
+      </div>
+    </section>
+
+    <!-- Section 5: #reserve Footer -->
+    <section id="reserve" data-theme="light">
+      <div class="reserve-cta-block reveal d1">
+        <h2 class="reserve-heading">Ready to wake up well?</h2>
+        <a href="#top" class="arrow-link" style="margin-top: 30px;">
+          <span>Start a better pour</span>
+          <span class="chevron-box">
+            <svg viewBox="0 0 10 10"><path d="M3 1.5L6.5 5L3 8.5"/></svg>
+          </span>
+        </a>
+      </div>
+
+      <div class="footer-brand reveal d2">
+        <div class="footer-brand-title">Cherrybeam Coffee</div>
+        <div class="footer-brand-tagline">Coffee for clear mornings</div>
+      </div>
+
+      <div class="footer-columns reveal d3">
+        <div class="footer-col">
+          <a href="#story">Tasting room</a>
+          <a href="#guide">Roast notes</a>
+          <a href="#story">Care guide</a>
+        </div>
+        <div class="footer-col">
+          <a href="#story">Our method</a>
+          <a href="#reserve">Contact</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Three.js Interactive Flight Scene -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    // 1. Loader & Readiness Guard
+    const loader = document.getElementById('loader');
+    const canvas = document.getElementById('cherry');
+
+    const markLoaded = () => {
+      loader.classList.add('done');
+      document.body.classList.add('loaded');
+      canvas.classList.add('ready');
+    };
+
+    // 2500ms safety guard
+    setTimeout(markLoaded, 2500);
+
+    // 2. Section Intersection Observer for .in and .reveal
+    const sections = document.querySelectorAll('main > section');
+    const sectionObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+        }
+      });
+    }, { threshold: 0.3 });
+
+    sections.forEach(s => sectionObserver.observe(s));
+
+    // 3. Scroll Parallax & Dark Theme Detection
+    const ornaments = document.querySelectorAll('.ornament');
+    const updateScrollEffects = () => {
+      const vh = window.innerHeight;
+      const scrollY = window.scrollY;
+
+      // Parallax ornaments
+      ornaments.forEach(orn => {
+        const parentSec = orn.closest('section');
+        if (!parentSec) return;
+        const rect = parentSec.getBoundingClientRect();
+        const progress = -rect.top / vh;
+        const speed = parseFloat(orn.getAttribute('data-speed') || '0');
+        const rot = parseFloat(orn.getAttribute('data-rot') || '0');
+        const yTrans = progress * speed * vh;
+        const rTrans = progress * rot;
+        orn.style.transform = `translateY(${yTrans}px) rotate(${rTrans}deg)`;
+      });
+
+      // Dark Theme handoff at 6% of viewport height
+      let isDark = false;
+      sections.forEach(sec => {
+        const rect = sec.getBoundingClientRect();
+        if (rect.top <= vh * 0.06 && rect.bottom >= vh * 0.06) {
+          if (sec.getAttribute('data-theme') === 'dark') {
+            isDark = true;
+          }
+        }
+      });
+
+      if (isDark) {
+        document.body.classList.add('on-dark');
+      } else {
+        document.body.classList.remove('on-dark');
+      }
+    };
+
+    window.addEventListener('scroll', updateScrollEffects, { passive: true });
+    updateScrollEffects();
+
+    // 4. Three.js Coffee Cherry Scene
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envTexture = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+
+    const scene = new THREE.Scene();
+    scene.environment = envTexture;
+
+    const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 10);
+
+    // Lights
+    const hemiLight = new THREE.HemisphereLight(0xf2eeff, 0x7a62c9, 1.3);
+    scene.add(hemiLight);
+
+    const dirLight1 = new THREE.DirectionalLight(0xfff1d6, 2.6);
+    dirLight1.position.set(3, 5, 6);
+    scene.add(dirLight1);
+
+    const dirLight2 = new THREE.DirectionalLight(0xc8b8ff, 2.2);
+    dirLight2.position.set(-5, 2, -4);
+    scene.add(dirLight2);
+
+    // Hierarchy: scene > flight > coffeeRoot > holder + sail groups
+    const flight = new THREE.Group();
+    const coffeeRoot = new THREE.Group();
+    const holder = new THREE.Group();
+    scene.add(flight);
+    flight.add(coffeeRoot);
+    coffeeRoot.add(holder);
+
+    // Build procedural glossy coffee cherry with stem
+    const cherryMat = new THREE.MeshPhysicalMaterial({
+      color: 0xB73945,
+      roughness: 0.18,
+      metalness: 0.05,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.12,
+      envMapIntensity: 0.7
+    });
+
+    const bodyGeom1 = new THREE.SphereGeometry(0.52, 32, 32);
+    bodyGeom1.scale(1.0, 1.15, 0.95);
+    const cherrySphere1 = new THREE.Mesh(bodyGeom1, cherryMat);
+    cherrySphere1.position.set(0.04, 0, 0);
+    cherrySphere1.frustumCulled = false;
+    holder.add(cherrySphere1);
+
+    const bodyGeom2 = new THREE.SphereGeometry(0.48, 32, 32);
+    bodyGeom2.scale(0.95, 1.12, 0.92);
+    const cherrySphere2 = new THREE.Mesh(bodyGeom2, new THREE.MeshPhysicalMaterial({
+      color: 0x962A35,
+      roughness: 0.22,
+      clearcoat: 0.8
+    }));
+    cherrySphere2.position.set(-0.06, -0.02, 0.02);
+    cherrySphere2.frustumCulled = false;
+    holder.add(cherrySphere2);
+
+    // Stem pointing along positive Z
+    const curve = new THREE.CubicBezierCurve3(
+      new THREE.Vector3(0, 0.55, 0),
+      new THREE.Vector3(0.08, 0.85, 0.15),
+      new THREE.Vector3(0.02, 1.1, 0.4),
+      new THREE.Vector3(0.12, 1.25, 0.65)
+    );
+    const stemGeom = new THREE.TubeGeometry(curve, 20, 0.035, 8, false);
+    const stemMat = new THREE.MeshStandardMaterial({
+      color: 0x8B5A2B,
+      roughness: 0.7
+    });
+    const stemMesh = new THREE.Mesh(stemGeom, stemMat);
+    stemMesh.frustumCulled = false;
+    holder.add(stemMesh);
+
+    // Build Chaff-Sails (Wings)
+    const sailTextureCanvas = document.createElement('canvas');
+    sailTextureCanvas.width = 512;
+    sailTextureCanvas.height = 288;
+    const ctx = sailTextureCanvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 512, 288);
+    grad.addColorStop(0, 'rgba(212, 122, 74, 0.95)');
+    grad.addColorStop(0.5, 'rgba(221, 232, 221, 0.65)');
+    grad.addColorStop(1, 'rgba(244, 240, 230, 0.1)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(10, 144);
+    ctx.bezierCurveTo(150, 20, 380, 40, 500, 144);
+    ctx.bezierCurveTo(360, 260, 140, 260, 10, 144);
+    ctx.fill();
+
+    const sailTexture = new THREE.CanvasTexture(sailTextureCanvas);
+    sailTexture.colorSpace = THREE.SRGBColorSpace;
+
+    const sailMat = new THREE.MeshBasicMaterial({
+      map: sailTexture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      opacity: 0.88
+    });
+
+    const createSailWing = (isLeft) => {
+      const wingGroup = new THREE.Group();
+      if (isLeft) wingGroup.scale.z = -1;
+
+      const sailGeom = new THREE.PlaneGeometry(0.85, 0.48);
+      sailGeom.translate(0.42, 0, 0);
+
+      const flapGroup = new THREE.Group();
+      const sailMesh = new THREE.Mesh(sailGeom, sailMat);
+      sailMesh.frustumCulled = false;
+      flapGroup.add(sailMesh);
+      wingGroup.add(flapGroup);
+
+      return { wingGroup, flapGroup };
+    };
+
+    const rightSail = createSailWing(false);
+    rightSail.wingGroup.position.set(0.25, 0.35, 0.1);
+    holder.add(rightSail.wingGroup);
+
+    const leftSail = createSailWing(true);
+    leftSail.wingGroup.position.set(-0.25, 0.35, 0.1);
+    holder.add(leftSail.wingGroup);
+
+    // Five Story Flight Targets
+    const desktopTargets = [
+      { yaw: 150, roll: -4, x: -0.03, pitch: 6, y: -0.12, s: 1.00 },
+      { yaw: 125, roll: 6, x: -0.30, pitch: 10, y: -0.04, s: 1.00 },
+      { yaw: 40, roll: -8, x: 0.22, pitch: -6, y: -0.30, s: 1.00 },
+      { yaw: 160, roll: 4, x: -0.22, pitch: 8, y: 0.02, s: 0.96 },
+      { yaw: 105, roll: 0, x: 0.02, pitch: 4, y: -0.08, s: 0.92 }
+    ];
+
+    const mobileTargets = [
+      { yaw: 150, roll: -4, x: 0.05, pitch: 6, y: -0.02, s: 0.75 },
+      { yaw: 125, roll: 6, x: 0.10, pitch: 10, y: 0.12, s: 0.80 },
+      { yaw: 40, roll: -8, x: 0.15, pitch: -6, y: -0.20, s: 0.75 },
+      { yaw: 160, roll: 4, x: 0.25, pitch: 8, y: 0.20, s: 0.72 },
+      { yaw: 105, roll: 0, x: 0, pitch: 4, y: 0.10, s: 0.70 }
+    ];
+
+    let currentX = 0, currentY = 0, currentScale = 1;
+    let currentYaw = 150, currentPitch = 6, currentRoll = -4;
+    let pointerX = 0, pointerY = 0, smoothPointerX = 0, smoothPointerY = 0;
+    let prevX = 0, prevY = 0;
+
+    window.addEventListener('pointermove', (e) => {
+      pointerX = (e.clientX / window.innerWidth) * 2 - 1;
+      pointerY = -(e.clientY / window.innerHeight) * 2 + 1;
+    }, { passive: true });
+
+    // Animation Loop
+    let lastTime = performance.now();
+    let isRendering = true;
+
+    document.addEventListener('visibilitychange', () => {
+      isRendering = !document.hidden;
+      if (isRendering) lastTime = performance.now();
+    });
+
+    const degToRad = (deg) => (deg * Math.PI) / 180;
+
+    const animate = (time) => {
+      requestAnimationFrame(animate);
+      if (!isRendering) return;
+
+      const dt = Math.min((time - lastTime) * 0.001, 0.05);
+      lastTime = time;
+
+      // Calculate scroll progress across 5 sections
+      const isMobile = window.innerWidth <= 760;
+      const targets = isMobile ? mobileTargets : desktopTargets;
+      const totalScrollHeight = (sections.length - 1) * window.innerHeight;
+      const pageProgress = Math.max(0, Math.min(sections.length - 1, (window.scrollY / Math.max(totalScrollHeight, 1)) * (sections.length - 1)));
+
+      const pairIndex = Math.min(Math.floor(pageProgress), targets.length - 2);
+      const rawFraction = pageProgress - pairIndex;
+
+      // Remap fraction from .12 through .76
+      let t = (rawFraction - 0.12) / (0.76 - 0.12);
+      t = Math.max(0, Math.min(1, t));
+
+      // Cubic transit easing: t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2
+      const easedT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      const t0 = targets[pairIndex];
+      const t1 = targets[pairIndex + 1];
+
+      // Vertical dive & mid-flight scale lift
+      const dive = Math.sin(t * Math.PI) * -0.22;
+      const scaleLift = 1 + Math.sin(t * Math.PI) * 0.12;
+
+      const targetX = t0.x + (t1.x - t0.x) * easedT;
+      const targetY = t0.y + (t1.y - t0.y) * easedT + dive;
+      const targetS = (t0.s + (t1.s - t0.s) * easedT) * scaleLift;
+
+      // Shortest angle difference for yaw
+      let diffYaw = ((t1.yaw - t0.yaw + 540) % 360) - 180;
+      const targetYaw = t0.yaw + diffYaw * easedT;
+      const targetPitch = t0.pitch + (t1.pitch - t0.pitch) * easedT;
+      const targetRoll = t0.roll + (t1.roll - t0.roll) * easedT;
+
+      // Smoothing
+      const smoothFactor = 1 - Math.exp(-dt * 3.2);
+      const smoothYawFactor = 1 - Math.exp(-dt * 2.6);
+
+      currentX += (targetX - currentX) * smoothFactor;
+      currentY += (targetY - currentY) * smoothFactor;
+      currentScale += (targetS - currentScale) * smoothFactor;
+      currentPitch += (targetPitch - currentPitch) * smoothFactor;
+      currentRoll += (targetRoll - currentRoll) * smoothFactor;
+      currentYaw += (targetYaw - currentYaw) * smoothYawFactor;
+
+      // Pointer smoothing
+      smoothPointerX += (pointerX - smoothPointerX) * (1 - Math.exp(-dt * 2));
+      smoothPointerY += (pointerY - smoothPointerY) * (1 - Math.exp(-dt * 2));
+
+      // Velocity calculation
+      const velX = (currentX - prevX) / Math.max(dt, 0.001);
+      const velY = (currentY - prevY) / Math.max(dt, 0.001);
+      prevX = currentX;
+      prevY = currentY;
+
+      // Camera half-dimensions at Z=10
+      const vFov = (camera.fov * Math.PI) / 180;
+      const halfHeight = Math.tan(vFov / 2) * 10;
+      const halfWidth = halfHeight * camera.aspect;
+
+      // Position Flight group
+      const tSec = time * 0.001;
+      const idleX = Math.sin(tSec * 1.3) * 0.04 + smoothPointerX * 0.12;
+      const idleY = (Math.sin(tSec * 2.1) * 0.045 + Math.sin(tSec * 3.7) * 0.015) * halfHeight * 0.5 + smoothPointerY * 0.08;
+      const idleZ = Math.sin(tSec * 0.9) * 0.15;
+
+      flight.position.x = currentX * halfWidth * 2 + idleX;
+      flight.position.y = currentY * halfHeight * 2 + idleY;
+      flight.position.z = idleZ;
+      flight.scale.setScalar(halfHeight * 2 * 0.30 * currentScale);
+
+      // Banking and rotations
+      flight.rotation.y = degToRad(currentYaw) + smoothPointerX * degToRad(12);
+
+      let clampedPitch = Math.max(-28, Math.min(28, currentPitch - velY * 22)) + Math.sin(tSec * 2.1 + 1) * 3 + smoothPointerY * 6;
+      let clampedRoll = Math.max(-30, Math.min(30, currentRoll + velX * 18)) + Math.sin(tSec * 1.7) * 4;
+
+      coffeeRoot.rotation.x = degToRad(clampedPitch);
+      coffeeRoot.rotation.z = degToRad(clampedRoll);
+
+      // Chaff Sail Wing Flaps (17Hz to 22Hz frequency)
+      const moving = Math.min(1, Math.abs(velX) + Math.abs(velY));
+      const freq = 2 * Math.PI * (17 + moving * 5);
+      const wingSine = Math.sin(tSec * freq);
+
+      rightSail.flapGroup.rotation.x = -0.25 + wingSine * 0.45;
+      rightSail.flapGroup.rotation.y = wingSine * 0.18;
+
+      leftSail.flapGroup.rotation.x = -0.25 + wingSine * 0.45;
+      leftSail.flapGroup.rotation.y = wingSine * 0.18;
+
+      renderer.render(scene, camera);
+    };
+
+    requestAnimationFrame(animate);
+
+    // Resize Handler
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      updateScrollEffects();
+    });
+
+    markLoaded();
+  </script>
+</body>
+</html>

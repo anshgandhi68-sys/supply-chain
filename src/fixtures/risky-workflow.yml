@@ -1,0 +1,37 @@
+name: Security Alert CI
+# Intentionally Risky CI Pipeline for Sentinel Supply Chain Testing
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions: write-all # VIOLATION: Excessive permissions granted to untrusted execution context
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      # VIOLATION GHA-001: Unpinned mutable tag (@v3)
+      # VIOLATION GHA-003: pull_request_target checking out untrusted PR head
+      - name: Checkout pull request code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # VIOLATION GHA-001: Unpinned action (@v2)
+      - name: Setup Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: 18
+
+      # VIOLATION GHA-005: Piping untrusted remote script directly to shell
+      - name: Install custom toolchain
+        run: |
+          curl -sSL https://raw.example.com/install.sh | bash
+
+      # VIOLATION GHA-004: Script injection via untrusted context string interpolation
+      - name: Log Issue Context
+        run: |
+          echo "Processing PR Title: ${{ github.event.pull_request.title }}"
+          echo "Author head branch: ${{ github.head_ref }}"

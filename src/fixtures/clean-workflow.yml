@@ -1,0 +1,26 @@
+name: Clean Production CI
+# Fully compliant, least-privilege workflow fixture
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1 (verified SHA)
+
+      - name: Setup Node Runtime
+        uses: actions/setup-node@60edb5dd545a775178f525247059d61702803897 # v4.0.2 (verified SHA)
+        with:
+          node-version: 20
+
+      - name: Run Deterministic Unit Tests
+        run: |
+          npm ci
+          npm test
