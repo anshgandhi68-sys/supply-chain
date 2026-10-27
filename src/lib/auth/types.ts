@@ -73,8 +73,11 @@ export interface AuditEvent {
 }
 
 export interface AuthContext {
-  user: User;
-  workspace: Workspace;
-  member: WorkspaceMember;
+  isAuthenticated: boolean;
+  user?: User;
+  workspace?: Workspace;
+  member?: WorkspaceMember;
   isDevelopmentMode: boolean;
+  authError?: string;
 }
+

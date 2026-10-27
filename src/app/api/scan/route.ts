@@ -21,7 +21,13 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
   const incomingRequestId = req.headers.get('x-request-id');
   const requestId = incomingRequestId || generateRequestId();
-  const client = getClientIdentifier(req);
+  const auth = await getAuthContext(req);
+  const client = getClientIdentifier(
+    req,
+    auth.isAuthenticated && auth.workspace && auth.user
+      ? { isAuthenticated: true, workspaceId: auth.workspace.id, userId: auth.user.id }
+      : undefined
+  );
   const policy = client.isAuthenticated ? AUTHENTICATED_POLICY : ANONYMOUS_POLICY;
 
   // 1. Sliding window rate limit check
@@ -143,9 +149,8 @@ export async function POST(req: NextRequest) {
     recordScanMetrics(durationMs, true);
 
     // Optional workspace persistence if authenticated and requested
-    if (body.saveToWorkspace) {
+    if (body.saveToWorkspace && auth.isAuthenticated && auth.workspace && auth.user) {
       try {
-        const auth = await getAuthContext(req);
         await saveWorkspaceScan(auth.workspace.id, auth.user.id, {
           repository: scanResult.repository?.fullName || body.projectName || 'Manual Scan',
           commitSha: scanResult.repository?.commitSha,

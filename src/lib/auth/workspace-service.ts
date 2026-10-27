@@ -14,6 +14,7 @@ import {
   AuthContext,
 } from './types';
 import { redactSecrets } from '../redaction';
+import { verifyManagedAuthToken } from './token-verifier';
 
 // Role hierarchy weights
 const ROLE_HIERARCHY: Record<WorkspaceRole, number> = {
@@ -24,6 +25,8 @@ const ROLE_HIERARCHY: Record<WorkspaceRole, number> = {
 };
 
 // In-memory data store for local development mode
+// NOTE: Process-local state. In serverless deployments (Vercel), state is ephemeral
+// and does NOT survive across separate serverless instances or cold starts.
 const inMemoryWorkspaces = new Map<string, Workspace>();
 const inMemoryMembers = new Map<string, WorkspaceMember[]>(); // key: workspaceId
 const inMemoryScans = new Map<string, StoredScanRecord[]>(); // key: workspaceId
@@ -58,40 +61,153 @@ inMemoryMembers.set(DEV_WORKSPACE.id, [
 inMemoryScans.set(DEV_WORKSPACE.id, []);
 
 /**
- * Resolves the authenticated context from the HTTP request.
- * Operates in local development mode unless production auth headers/environment are set.
+ * Resolves the authenticated context from the HTTP request with strict fail-closed security.
+ * - In managed mode (or deployed environments), requires a cryptographically valid JWT Bearer token.
+ * - Rejects unauthenticated requests safely.
+ * - Prevents client-supplied headers from escalating privileges.
  */
 export async function getAuthContext(req?: Request): Promise<AuthContext> {
+  const isDeployed = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  const provider = process.env.AUTH_PROVIDER || (isDeployed ? 'managed' : 'local');
+
+  // 1. Managed Provider Flow (Production / Managed Auth)
+  if (provider === 'managed') {
+    const authHeader = req?.headers.get('authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return {
+        isAuthenticated: false,
+        authError: 'Missing or malformed Authorization header (expected Bearer token).',
+        isDevelopmentMode: false,
+      };
+    }
+
+    const token = authHeader.slice(7).trim();
+    const secret = process.env.MANAGED_AUTH_SECRET;
+    if (!secret) {
+      return {
+        isAuthenticated: false,
+        authError: 'Authentication service misconfigured: MANAGED_AUTH_SECRET is not set.',
+        isDevelopmentMode: false,
+      };
+    }
+
+    const verification = verifyManagedAuthToken(token, secret, {
+      issuer: process.env.MANAGED_AUTH_ISSUER,
+      audience: process.env.MANAGED_AUTH_AUDIENCE,
+    });
+
+    if (!verification.valid || !verification.claims) {
+      return {
+        isAuthenticated: false,
+        authError: verification.error || 'Invalid authentication token.',
+        isDevelopmentMode: false,
+      };
+    }
+
+    const claims = verification.claims;
+    const userId = claims.sub;
+    const workspaceId = (claims.workspace_id || claims.org_id || `ws_${userId}`) as string;
+    const role = (claims.role as WorkspaceRole) || 'analyst';
+
+    let workspace = inMemoryWorkspaces.get(workspaceId);
+    if (!workspace) {
+      workspace = {
+        id: workspaceId,
+        name: (claims.org_name as string) || `Workspace ${workspaceId}`,
+        slug: workspaceId,
+        tier: 'pilot',
+        createdAt: new Date().toISOString(),
+        maxScansPerMonth: 100,
+      };
+      inMemoryWorkspaces.set(workspaceId, workspace);
+      inMemoryMembers.set(workspaceId, [
+        {
+          workspaceId,
+          userId,
+          role,
+          joinedAt: new Date().toISOString(),
+        },
+      ]);
+      inMemoryScans.set(workspaceId, []);
+    }
+
+    const members = inMemoryMembers.get(workspaceId) || [];
+    let member = members.find((m) => m.userId === userId);
+    if (!member) {
+      member = { workspaceId, userId, role, joinedAt: new Date().toISOString() };
+      members.push(member);
+      inMemoryMembers.set(workspaceId, members);
+    }
+
+    return {
+      isAuthenticated: true,
+      user: {
+        id: userId,
+        email: claims.email || `${userId}@managed.auth`,
+        name: claims.name || `User ${userId}`,
+        createdAt: new Date().toISOString(),
+      },
+      workspace,
+      member,
+      isDevelopmentMode: false,
+    };
+  }
+
+  // 2. Deployed Environment Protection for Local Dev Mode
+  // If deployed in production/Vercel and provider is 'local', fail closed unless ALLOW_LOCAL_DEV_AUTH is explicitly 'true'
+  if (isDeployed && process.env.ALLOW_LOCAL_DEV_AUTH !== 'true') {
+    return {
+      isAuthenticated: false,
+      authError: 'Local development authentication is disabled in deployed environments.',
+      isDevelopmentMode: false,
+    };
+  }
+
+  // 3. Local Development Mode (strictly for local development & test fixtures)
   const customWorkspaceId = req?.headers.get('x-sentinel-workspace-id');
   const customUserId = req?.headers.get('x-sentinel-user-id');
 
-  // In production with managed auth, validate token/session against provider
-  if (process.env.AUTH_PROVIDER === 'managed' && process.env.MANAGED_AUTH_SECRET) {
-    // Reserved for managed provider verification (Clerk / Supabase JWT)
-  }
-
-  // Local development / preview mode
   const workspaceId = customWorkspaceId || DEV_WORKSPACE.id;
   const userId = customUserId || DEV_USER.id;
 
-  const workspace = inMemoryWorkspaces.get(workspaceId) || DEV_WORKSPACE;
+  const workspace = inMemoryWorkspaces.get(workspaceId);
+  if (!workspace) {
+    return {
+      isAuthenticated: false,
+      authError: `Workspace '${workspaceId}' not found.`,
+      isDevelopmentMode: true,
+    };
+  }
+
   const members = inMemoryMembers.get(workspaceId) || [];
-  const member = members.find((m) => m.userId === userId) || {
+  const member = members.find((m) => m.userId === userId);
+
+  // If client provided a specific userId that does not belong to the workspace, reject
+  if (!member && customUserId) {
+    return {
+      isAuthenticated: false,
+      authError: `User '${userId}' is not a registered member of workspace '${workspaceId}'.`,
+      isDevelopmentMode: true,
+    };
+  }
+
+  const activeMember = member || {
     workspaceId: workspace.id,
-    userId,
-    role: 'viewer' as WorkspaceRole,
-    joinedAt: new Date().toISOString(),
+    userId: DEV_USER.id,
+    role: 'owner' as WorkspaceRole,
+    joinedAt: DEV_USER.createdAt,
   };
 
   return {
+    isAuthenticated: true,
     user: {
-      id: userId,
-      email: `${userId}@sentinel.local`,
-      name: userId === DEV_USER.id ? DEV_USER.name : `User ${userId}`,
+      id: activeMember.userId,
+      email: `${activeMember.userId}@sentinel.local`,
+      name: activeMember.userId === DEV_USER.id ? DEV_USER.name : `User ${activeMember.userId}`,
       createdAt: DEV_USER.createdAt,
     },
     workspace,
-    member,
+    member: activeMember,
     isDevelopmentMode: true,
   };
 }
@@ -221,8 +337,11 @@ export async function listWorkspaceScans(
   const list = inMemoryScans.get(workspaceId) || [];
   const now = new Date().toISOString();
 
-  // Filter out records past their retention expiration
+  // Filter out and actively prune records past their retention expiration from storage
   const activeScans = list.filter((scan) => scan.retentionExpiresAt > now);
+  if (activeScans.length !== list.length) {
+    inMemoryScans.set(workspaceId, activeScans);
+  }
 
   return { success: true, scans: activeScans };
 }

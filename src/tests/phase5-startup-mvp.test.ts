@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   requireWorkspaceAccess,
@@ -7,6 +8,7 @@ import {
   logAuditEvent,
   listAuditEvents,
   createTestWorkspace,
+  getAuthContext,
 } from '@/lib/auth/workspace-service';
 import {
   checkRateLimit,
@@ -15,10 +17,12 @@ import {
   recordScanMetrics,
   getSystemMetrics,
   resetRateLimiterForTests,
+  getClientIdentifier,
   ANONYMOUS_POLICY,
   AUTHENTICATED_POLICY,
 } from '@/lib/rate-limiter';
 import { getSafeAgent } from '@/lib/github';
+import { verifyManagedAuthToken } from '@/lib/auth/token-verifier';
 
 describe('Phase 5 — Startup MVP Foundation, Workspaces, Rate Limiting & Trust', () => {
   beforeEach(() => {
@@ -216,6 +220,129 @@ describe('Phase 5 — Startup MVP Foundation, Workspaces, Rate Limiting & Trust'
       const agent = getSafeAgent();
       expect(agent).toBeDefined();
       expect(typeof agent.dispatch).toBe('function');
+    });
+  });
+
+  describe('5. Cryptographic Managed Auth Token Verification (Clerk / Supabase / Auth0)', () => {
+    const TEST_SECRET = 'sentinel_managed_auth_super_secret_key_123';
+
+    function createTestJwt(payload: Record<string, unknown>, secret: string, alg = 'HS256'): string {
+      const headerStr = Buffer.from(JSON.stringify({ alg, typ: 'JWT' })).toString('base64url');
+      const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const sig =
+        alg === 'none'
+          ? ''
+          : crypto.createHmac('sha256', secret).update(`${headerStr}.${payloadStr}`).digest('base64url');
+      return `${headerStr}.${payloadStr}.${sig}`;
+    }
+
+    it('verifies a valid token with HS256 signature and returns claims', () => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const token = createTestJwt(
+        {
+          sub: 'usr_clerk_123',
+          email: 'analyst@startup.com',
+          workspace_id: 'ws_prod_01',
+          exp: nowSec + 3600,
+          iss: 'https://clerk.startup.com',
+          aud: 'sentinel-api',
+        },
+        TEST_SECRET
+      );
+
+      const result = verifyManagedAuthToken(token, TEST_SECRET, {
+        issuer: 'https://clerk.startup.com',
+        audience: 'sentinel-api',
+      });
+      expect(result.valid).toBe(true);
+      expect(result.claims?.sub).toBe('usr_clerk_123');
+      expect(result.claims?.workspace_id).toBe('ws_prod_01');
+    });
+
+    it('strictly forbids alg: none attack vectors', () => {
+      const token = createTestJwt({ sub: 'usr_attacker' }, '', 'none');
+      const result = verifyManagedAuthToken(token, TEST_SECRET);
+      expect(result.valid).toBe(false);
+      expect(result.error).toMatch(/disallowed|forbidden|none/i);
+    });
+
+    it('rejects forged token signatures with wrong secret', () => {
+      const token = createTestJwt({ sub: 'usr_impersonator' }, 'wrong_secret');
+      const result = verifyManagedAuthToken(token, TEST_SECRET);
+      expect(result.valid).toBe(false);
+      expect(result.error).toMatch(/invalid.*signature/i);
+    });
+
+    it('rejects expired tokens safely', () => {
+      const pastSec = Math.floor(Date.now() / 1000) - 300; // 5 mins ago
+      const token = createTestJwt({ sub: 'usr_expired', exp: pastSec }, TEST_SECRET);
+      const result = verifyManagedAuthToken(token, TEST_SECRET);
+      expect(result.valid).toBe(false);
+      expect(result.error).toMatch(/expired/i);
+    });
+
+    it('rejects issuer and audience mismatches', () => {
+      const token = createTestJwt(
+        { sub: 'usr_1', iss: 'https://evil.issuer.com', aud: 'other-app' },
+        TEST_SECRET
+      );
+
+      const issResult = verifyManagedAuthToken(token, TEST_SECRET, { issuer: 'https://valid.issuer.com' });
+      expect(issResult.valid).toBe(false);
+      expect(issResult.error).toMatch(/issuer mismatch/i);
+
+      const audResult = verifyManagedAuthToken(token, TEST_SECRET, { audience: 'sentinel-api' });
+      expect(audResult.valid).toBe(false);
+      expect(audResult.error).toMatch(/audience mismatch/i);
+    });
+  });
+
+  describe('6. Fail-Closed Authentication & Spoofing Defense', () => {
+    it('fails closed when managed auth is configured without Authorization header', async () => {
+      const originalProvider = process.env.AUTH_PROVIDER;
+      process.env.AUTH_PROVIDER = 'managed';
+      process.env.MANAGED_AUTH_SECRET = 'secret';
+
+      try {
+        const req = new Request('https://sentinel.local/api/workspaces');
+        const auth = await getAuthContext(req);
+        expect(auth.isAuthenticated).toBe(false);
+        expect(auth.authError).toMatch(/missing.*authorization/i);
+      } finally {
+        process.env.AUTH_PROVIDER = originalProvider;
+      }
+    });
+
+    it('fails closed when managed auth secret is missing', async () => {
+      const originalProvider = process.env.AUTH_PROVIDER;
+      const originalSecret = process.env.MANAGED_AUTH_SECRET;
+      process.env.AUTH_PROVIDER = 'managed';
+      delete process.env.MANAGED_AUTH_SECRET;
+
+      try {
+        const req = new Request('https://sentinel.local/api/workspaces', {
+          headers: { authorization: 'Bearer dummy.token.here' },
+        });
+        const auth = await getAuthContext(req);
+        expect(auth.isAuthenticated).toBe(false);
+        expect(auth.authError).toMatch(/MANAGED_AUTH_SECRET is not set/i);
+      } finally {
+        process.env.AUTH_PROVIDER = originalProvider;
+        if (originalSecret) process.env.MANAGED_AUTH_SECRET = originalSecret;
+      }
+    });
+
+    it('refuses to elevate rate-limiting tier for unverified client headers', () => {
+      const fakeHeaders = new Headers({
+        'x-sentinel-workspace-id': 'ws_unverified_attacker',
+        'x-sentinel-user-id': 'usr_attacker',
+      });
+      const req = new Request('https://sentinel.local/api/scan', { headers: fakeHeaders });
+
+      // Without verifiedAuthContext, caller MUST be classified as unauthenticated IP
+      const client = getClientIdentifier(req);
+      expect(client.isAuthenticated).toBe(false);
+      expect(client.id).toMatch(/^ip:/);
     });
   });
 });

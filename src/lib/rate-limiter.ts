@@ -33,11 +33,6 @@ interface WindowEntry {
   timestamps: number[];
 }
 
-// In-memory process-local state
-const requestWindows = new Map<string, WindowEntry>();
-const activeConcurrency = new Map<string, number>();
-
-// Metrics storage
 export interface TelemetryMetrics {
   totalScanRequests: number;
   successfulScans: number;
@@ -62,33 +57,52 @@ const metrics: TelemetryMetrics = {
 
 let totalDurationSum = 0;
 
+interface ConcurrencyRecord {
+  count: number;
+  lastUpdated: number;
+}
+
+// In-memory process-local state
+const requestWindows = new Map<string, WindowEntry>();
+const activeConcurrency = new Map<string, ConcurrencyRecord>();
+
 /**
- * Extracts a unique client identifier from headers.
- * Prefers verified workspace ID or user ID, falls back to IP address.
+ * Extracts a unique client identifier.
+ * Uses verified authentication context if present; otherwise strictly uses edge-verified IP address.
+ * NEVER trusts unauthenticated client headers (x-sentinel-*) for rate-limit tier elevation.
  */
-export function getClientIdentifier(req: Request): {
+export function getClientIdentifier(
+  req: Request,
+  verifiedAuth?: { isAuthenticated: boolean; workspaceId?: string; userId?: string }
+): {
   id: string;
   isAuthenticated: boolean;
   clientIp: string;
 } {
-  const customWorkspace = req.headers.get('x-sentinel-workspace-id');
-  const customUser = req.headers.get('x-sentinel-user-id');
+  // If verified by server-side auth (JWT signature or validated session), grant authenticated rate limit
+  if (verifiedAuth?.isAuthenticated && verifiedAuth.workspaceId) {
+    return { id: `ws:${verifiedAuth.workspaceId}`, isAuthenticated: true, clientIp: 'authenticated' };
+  }
+  if (verifiedAuth?.isAuthenticated && verifiedAuth.userId) {
+    return { id: `usr:${verifiedAuth.userId}`, isAuthenticated: true, clientIp: 'authenticated' };
+  }
 
+  // Edge-verified IP resolution (prevents x-forwarded-for spoofing)
+  const realIp = req.headers.get('x-real-ip');
   const forwarded = req.headers.get('x-forwarded-for');
-  const clientIp = forwarded ? forwarded.split(',')[0].trim() : '127.0.0.1';
+  // In Vercel, x-real-ip cannot be forged by client; if using forwarded, take rightmost IP
+  const clientIp = (
+    realIp ||
+    (forwarded ? forwarded.split(',').pop()?.trim() : null) ||
+    '127.0.0.1'
+  ).replace(/[^a-zA-Z0-9.:_-]/g, '');
 
-  if (customWorkspace) {
-    return { id: `ws:${customWorkspace}`, isAuthenticated: true, clientIp };
-  }
-  if (customUser) {
-    return { id: `usr:${customUser}`, isAuthenticated: true, clientIp };
-  }
-
-  return { id: `ip:${clientIp}`, isAuthenticated: false, clientIp };
+  return { id: `ip:${clientIp || '127.0.0.1'}`, isAuthenticated: false, clientIp: clientIp || '127.0.0.1' };
 }
 
 /**
  * Checks rate limit for a client identifier and updates sliding window.
+ * Automatically evicts stale client windows when memory threshold is exceeded.
  */
 export function checkRateLimit(
   clientId: string,
@@ -101,6 +115,16 @@ export function checkRateLimit(
 } {
   const now = Date.now();
   const windowStart = now - policy.windowMs;
+
+  // Periodic memory eviction for process-local maps
+  if (requestWindows.size > 500) {
+    for (const [key, entry] of requestWindows.entries()) {
+      entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
+      if (entry.timestamps.length === 0) {
+        requestWindows.delete(key);
+      }
+    }
+  }
 
   let entry = requestWindows.get(clientId);
   if (!entry) {
@@ -137,18 +161,28 @@ export function checkRateLimit(
 
 /**
  * Attempts to acquire an in-flight concurrency slot.
+ * Automatically resets stale concurrency slots abandoned after 60 seconds.
  */
 export function acquireConcurrencySlot(
   clientId: string,
   maxConcurrent: number
 ): { acquired: boolean; currentActive: number } {
-  const current = activeConcurrency.get(clientId) || 0;
+  const now = Date.now();
+  const record = activeConcurrency.get(clientId);
+
+  let current = record?.count || 0;
+
+  // Stale slot reclamation: if last acquired > 60s ago, reset abandoned slot
+  if (record && now - record.lastUpdated > 60000) {
+    current = 0;
+  }
+
   if (current >= maxConcurrent) {
     metrics.concurrencyRejections++;
     return { acquired: false, currentActive: current };
   }
 
-  activeConcurrency.set(clientId, current + 1);
+  activeConcurrency.set(clientId, { count: current + 1, lastUpdated: now });
   return { acquired: true, currentActive: current + 1 };
 }
 
@@ -156,11 +190,11 @@ export function acquireConcurrencySlot(
  * Releases an in-flight concurrency slot upon completion or abort.
  */
 export function releaseConcurrencySlot(clientId: string): void {
-  const current = activeConcurrency.get(clientId) || 0;
-  if (current <= 1) {
+  const record = activeConcurrency.get(clientId);
+  if (!record || record.count <= 1) {
     activeConcurrency.delete(clientId);
   } else {
-    activeConcurrency.set(clientId, current - 1);
+    activeConcurrency.set(clientId, { count: record.count - 1, lastUpdated: Date.now() });
   }
 }
 

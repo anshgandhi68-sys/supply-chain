@@ -19,6 +19,12 @@ Supply Chain Sentinel 2.0 is built on the principle of **data minimization** and
 | **User & Workspace IDs** | Yes | Verified against session context | Stored in workspace directory | Permanent until account deletion |
 | **Audit Logs** | Yes | Generated on sensitive state changes | Append-only ledger | 90 days |
 
+> [!IMPORTANT]
+> **STORAGE ARCHITECTURE NOTICE (MVP & PREVIEW):**  
+> In the current MVP foundation, workspace scan records and audit logs are managed in type-safe process-local memory designed for local development and private preview demonstrations.
+> In serverless hosting (such as Vercel), serverless functions run statelessly; process memory does **not** persist across cold starts or separate worker instances.
+> **Production persistence requires connecting an external managed database (e.g. PostgreSQL via Supabase / Neon / Prisma) before advancing from Private Preview to General Availability.**
+
 ---
 
 ## 3. Zero-Token Persistence Guarantee

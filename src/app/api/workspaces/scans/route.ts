@@ -16,6 +16,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthContext(request);
+    if (!auth.isAuthenticated || !auth.user || !auth.workspace) {
+      return NextResponse.json(
+        { error: auth.authError || 'Unauthorized: Authentication required.' },
+        { status: 401 }
+      );
+    }
+
     const targetWorkspaceId = request.nextUrl.searchParams.get('workspaceId') || auth.workspace.id;
 
     const result = await listWorkspaceScans(targetWorkspaceId, auth.user.id);
@@ -48,6 +55,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthContext(request);
+    if (!auth.isAuthenticated || !auth.user || !auth.workspace) {
+      return NextResponse.json(
+        { error: auth.authError || 'Unauthorized: Authentication required.' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
 
     if (!body || !body.repository) {
@@ -99,6 +113,13 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const auth = await getAuthContext(request);
+    if (!auth.isAuthenticated || !auth.user || !auth.workspace) {
+      return NextResponse.json(
+        { error: auth.authError || 'Unauthorized: Authentication required.' },
+        { status: 401 }
+      );
+    }
+
     const scanId = request.nextUrl.searchParams.get('scanId');
     const targetWorkspaceId = request.nextUrl.searchParams.get('workspaceId') || auth.workspace.id;
 
