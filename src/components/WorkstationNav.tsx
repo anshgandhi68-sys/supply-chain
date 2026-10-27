@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 
 export const WorkstationNav: React.FC = () => {
   const pathname = usePathname();
@@ -55,10 +56,31 @@ export const WorkstationNav: React.FC = () => {
         </div>
       </div>
 
-      {/* Right CTA */}
-      <Link href="/telemetry" className="cta text-sm font-medium">
-        Telemetry &amp; coverage
-      </Link>
+      {/* Right Auth & CTA */}
+      <div className="flex items-center space-x-3">
+        <Link href="/telemetry" className="cta text-sm font-medium hidden sm:inline-flex">
+          Telemetry &amp; coverage
+        </Link>
+        <React.Suspense fallback={<div className="w-16 h-7 rounded bg-[rgb(17_17_15_/_5%)] animate-pulse" />}>
+          <Show when="signed-out">
+            <div className="flex items-center space-x-2">
+              <SignInButton mode="modal">
+                <button className="px-2.5 py-1 rounded border border-[rgb(17_17_15_/_25%)] text-xs font-mono font-bold hover:bg-[#11110F] hover:text-[#F2F0EA] transition-colors cursor-pointer">
+                  Sign In
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="px-2.5 py-1 rounded bg-[#B85E3E] text-[#F2F0EA] text-xs font-mono font-bold hover:bg-[#9E4D31] transition-colors cursor-pointer">
+                  Sign Up
+                </button>
+              </SignUpButton>
+            </div>
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </React.Suspense>
+      </div>
 
       {/* Mobile Burger Toggle */}
       <button

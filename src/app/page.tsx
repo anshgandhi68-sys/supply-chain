@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import * as THREE from 'three';
 import { useScan } from '@/lib/context/ScanContext';
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 import { validateJsonInput } from '@/lib/validation';
 import { parsePackageJson, parsePackageLockJson, reconcileWithLockfile } from '@/lib/manifests/package-json';
 
@@ -620,9 +621,28 @@ Static analysis examines declared and resolved manifests without runtime code ex
           <button onClick={() => setActiveDialog('reports')}>Reports</button>
         </div>
 
-        <button className="cta" onClick={() => setActiveDialog('telemetry')}>
-          Telemetry &amp; coverage
-        </button>
+        <div className="flex items-center space-x-2">
+          <button className="cta" onClick={() => setActiveDialog('telemetry')}>
+            Telemetry &amp; coverage
+          </button>
+          <React.Suspense fallback={<div className="w-16 h-7 rounded bg-[rgb(17_17_15_/_5%)] animate-pulse" />}>
+            <Show when="signed-out">
+              <SignInButton mode="modal">
+                <button className="px-2.5 py-1 rounded border border-[rgb(17_17_15_/_20%)] text-xs font-mono font-bold hover:bg-[#11110F] hover:text-[#F2F0EA] transition-colors cursor-pointer">
+                  Sign In
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="px-2.5 py-1 rounded bg-[#B85E3E] text-[#F2F0EA] text-xs font-mono font-bold hover:bg-[#9E4D31] transition-colors cursor-pointer">
+                  Sign Up
+                </button>
+              </SignUpButton>
+            </Show>
+            <Show when="signed-in">
+              <UserButton />
+            </Show>
+          </React.Suspense>
+        </div>
 
         <button
           className="burger"

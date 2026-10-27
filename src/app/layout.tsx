@@ -1,3 +1,4 @@
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from 'next';
 import './globals.css';
 import { ScanProvider } from '@/lib/context/ScanContext';
@@ -38,12 +39,14 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-[#F2F0EA] text-[#11110F] antialiased selection:bg-[#11110F] selection:text-[#F2F0EA]">
-        <ScanProvider>
+        <ClerkProvider>
+          <ScanProvider>
           <div className="min-h-screen flex flex-col bg-[#F2F0EA]">
-            <WorkstationNav />
-            <main className="flex-1 flex flex-col">{children}</main>
+          <WorkstationNav />
+          <main className="flex-1 flex flex-col">{children}</main>
           </div>
-        </ScanProvider>
+          </ScanProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
