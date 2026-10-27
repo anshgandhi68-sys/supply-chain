@@ -4,7 +4,7 @@ import { ScanProvider } from '@/lib/context/ScanContext';
 import { WorkstationNav } from '@/components/WorkstationNav';
 
 export const metadata: Metadata = {
-  title: 'Supply Chain Sentinel 2.0 | Software Security Investigation Platform',
+  title: 'SENTINEL 2.0 | Software Supply Chain Security Workstation',
   description:
     'Evidence-driven software supply-chain security investigation workstation analyzing dependency lineages, attack graphs, and safe remediations.',
 };
@@ -15,8 +15,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap"
+          rel="stylesheet"
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -31,9 +37,9 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-screen bg-[#07111F] text-[#F1F6FC] font-sans antialiased selection:bg-[#48D9C1] selection:text-[#07111F]">
+      <body className="min-h-screen bg-[#F2F0EA] text-[#11110F] antialiased selection:bg-[#11110F] selection:text-[#F2F0EA]">
         <ScanProvider>
-          <div className="min-h-screen flex flex-col bg-[#07111F] cyber-grid">
+          <div className="min-h-screen flex flex-col bg-[#F2F0EA]">
             <WorkstationNav />
             <main className="flex-1 flex flex-col">{children}</main>
           </div>
@@ -42,4 +48,3 @@ export default function RootLayout({
     </html>
   );
 }
-
