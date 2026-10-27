@@ -1,10 +1,12 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ScanProvider } from '@/lib/context/ScanContext';
+import { WorkstationNav } from '@/components/WorkstationNav';
 
 export const metadata: Metadata = {
-  title: 'Supply Chain Sentinel | Software Security Investigation',
+  title: 'Supply Chain Sentinel 2.0 | Software Security Investigation Platform',
   description:
-    'Real-time software supply-chain security investigation tool analyzing public GitHub repositories for OSV vulnerabilities and risky GitHub Actions.',
+    'Evidence-driven software supply-chain security investigation workstation analyzing dependency lineages, attack graphs, and safe remediations.',
 };
 
 export default function RootLayout({
@@ -13,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -29,9 +31,15 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-screen antialiased selection:bg-[#D47A4A] selection:text-white">
-        {children}
+      <body className="min-h-screen bg-[#07111F] text-[#F1F6FC] font-sans antialiased selection:bg-[#48D9C1] selection:text-[#07111F]">
+        <ScanProvider>
+          <div className="min-h-screen flex flex-col bg-[#07111F] cyber-grid">
+            <WorkstationNav />
+            <main className="flex-1 flex flex-col">{children}</main>
+          </div>
+        </ScanProvider>
       </body>
     </html>
   );
 }
+

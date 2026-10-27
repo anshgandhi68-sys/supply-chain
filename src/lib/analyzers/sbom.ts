@@ -49,9 +49,20 @@ export function generateCycloneDxBom(
   const serialUuid = `urn:uuid:${Math.random().toString(36).substring(2, 10)}-${Date.now()}`;
   const timestamp = new Date().toISOString();
 
+  // Root application bom-ref
+  const rootBomRef = `pkg:generic/${repoMeta.fullName}@${repoMeta.resolvedCommitSha || repoMeta.defaultBranch}`;
+
+  // Build map of package name to purl/bom-ref
+  const purlByPackageName = new Map<string, string>();
+  for (const pkg of packages) {
+    purlByPackageName.set(pkg.name, buildPurl(pkg.ecosystem, pkg.name, pkg.version));
+  }
+  const validBomRefs = new Set<string>([rootBomRef, ...Array.from(purlByPackageName.values())]);
+
   const components = packages.map((pkg) => {
-    const purl = buildPurl(pkg.ecosystem, pkg.name, pkg.version);
+    const purl = purlByPackageName.get(pkg.name)!;
     return {
+      'bom-ref': purl,
       type: 'library',
       name: pkg.name,
       version: pkg.version,
@@ -66,10 +77,50 @@ export function generateCycloneDxBom(
     };
   });
 
+  // Build validated dependency graph without invalid or dangling references
+  const dependencies: Array<{ ref: string; dependsOn: string[] }> = [];
+
+  // Root dependency node
+  const directRefs = packages
+    .filter((p) => p.isDirect)
+    .map((p) => purlByPackageName.get(p.name)!)
+    .filter((ref) => Boolean(ref) && validBomRefs.has(ref));
+
+  dependencies.push({
+    ref: rootBomRef,
+    dependsOn: Array.from(new Set(directRefs)),
+  });
+
+  // Package dependency nodes
+  for (const pkg of packages) {
+    const pkgRef = purlByPackageName.get(pkg.name)!;
+    const childRefs: string[] = [];
+
+    if (pkg.dependencies && typeof pkg.dependencies === 'object') {
+      for (const childName of Object.keys(pkg.dependencies)) {
+        const childPurl = purlByPackageName.get(childName);
+        if (childPurl && validBomRefs.has(childPurl)) {
+          childRefs.push(childPurl);
+        }
+      }
+    }
+
+    dependencies.push({
+      ref: pkgRef,
+      dependsOn: Array.from(new Set(childRefs)),
+    });
+  }
+
   const dependencyVulnerabilities = findings
     .filter((f) => f.category === 'dependency_vulnerability')
     .map((f) => {
       const advisoryId = f.detectionSource.replace(/^OSV Advisory\s*/i, '').split('/')[0].trim();
+      let affectedPkgName = '';
+      if (f.observedValue && f.observedValue.includes('@')) {
+        affectedPkgName = f.observedValue.split('@')[0].trim();
+      }
+      const affectedRef = purlByPackageName.get(affectedPkgName);
+
       return {
         id: advisoryId,
         source: {
@@ -85,6 +136,7 @@ export function generateCycloneDxBom(
         ],
         description: f.title,
         recommendation: f.recommendedAction,
+        affects: affectedRef ? [{ ref: affectedRef }] : [],
       };
     });
 
@@ -103,6 +155,7 @@ export function generateCycloneDxBom(
         },
       ],
       component: {
+        'bom-ref': rootBomRef,
         type: 'application',
         name: repoMeta.fullName,
         version: repoMeta.resolvedCommitSha || repoMeta.latestCommitSha || repoMeta.defaultBranch,
@@ -110,6 +163,7 @@ export function generateCycloneDxBom(
       },
     },
     components,
+    dependencies,
     vulnerabilities: dependencyVulnerabilities,
   };
 }

@@ -1,17 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ScanResult } from '@/lib/types';
+import { generateMarkdownReport, generateHtmlReport } from '@/lib/reports';
 
 export async function POST(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const format = searchParams.get('format') || 'json';
-    const body: { result: ScanResult } = await req.json();
+    const body: { result: ScanResult; format?: string } = await req.json();
+    const format = searchParams.get('format') || body?.format || 'json';
 
     if (!body || !body.result) {
       return NextResponse.json({ error: 'Valid ScanResult object is required in request body.' }, { status: 400 });
     }
 
     const result = body.result;
+
+    if (format === 'markdown' || format === 'md') {
+      const md = generateMarkdownReport(result);
+      return new NextResponse(md, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${result.repository.repo || 'sentinel'}-audit-report.md"`,
+        },
+      });
+    }
+
+    if (format === 'html') {
+      const html = generateHtmlReport(result);
+      return new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${result.repository.repo || 'sentinel'}-audit-report.html"`,
+        },
+      });
+    }
 
     if (format === 'cyclonedx') {
       const sbom = result.sbomCycloneDx;

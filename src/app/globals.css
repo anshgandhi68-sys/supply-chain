@@ -5,45 +5,32 @@
 @tailwind utilities;
 
 :root {
-  --ink: #071F20;
-  --spruce: #123B3A;
-  --mist: #DDE8DD;
-  --paper: #F4F0E6;
-  --muted: #476363;
-  --copper: #D47A4A;
-  --fruit: #B73945;
-  --num: #B8D7CC;
-  --num-dark: #82A7A5;
-  --line: #FFFFFF2E;
-  --line-light: #071F2026;
-  --pad: clamp(18px, 3.2vw, 46px);
-
-  --background: #DDE8DD;
-  --foreground: #071F20;
+  --background: #07111F;
+  --foreground: #F1F6FC;
   --navy: #0B1728;
   --surface: #111F33;
   --surface-secondary: #17283C;
+  --surface-elevated: #1D314A;
   --teal: #48D9C1;
   --cyan: #65BFFF;
   --mint: #B6F3E5;
   --accent-high: #FF647C;
   --accent-warning: #FFC36B;
   --accent-info: #75B8FF;
+  --text-primary: #F1F6FC;
+  --text-secondary: #9AAEC4;
+  --text-muted: #6E829B;
+  --hairline: rgba(159, 190, 220, 0.16);
 }
 
 body {
-  color: var(--ink);
-  background-color: var(--mist);
-  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  color: var(--text-primary);
+  background-color: var(--background);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-feature-settings: "kern" 1, "liga" 1;
   overflow-x: hidden;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  transition: color 500ms ease, background-color 500ms ease;
-}
-
-body.on-dark {
-  color: #FFFFFF;
 }
 
 /* Custom glowing cyber scrollbar */

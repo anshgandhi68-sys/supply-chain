@@ -35,10 +35,12 @@ import { inspectWorkflow } from './actions/engine';
 import { inspectFileForSecrets } from './analyzers/secrets';
 import { inspectDockerfile } from './analyzers/docker';
 import { generateCycloneDxBom } from './analyzers/sbom';
+import { buildDependencyGraph } from './graph';
+import { enrichFindingWithEvidence } from './investigation';
 import fs from 'fs';
 import path from 'path';
 
-export const SCANNER_VERSION = '1.2.0';
+export const SCANNER_VERSION = '2.0.0';
 
 // Known manifest file patterns for tree matching
 const MANIFEST_PATTERNS = [
@@ -122,6 +124,7 @@ export async function runSupplyChainScan(
   const isDemoRequest =
     forceDemo ||
     rawUrl.toLowerCase().includes('sentinel/demo') ||
+    rawUrl.toLowerCase().includes('supply-chain-demo') ||
     rawUrl.toLowerCase() === 'demo';
 
   if (isDemoRequest) {
@@ -245,7 +248,8 @@ export async function runSupplyChainScan(
       false,
       undefined,
       Date.now() - startTime,
-      sbom
+      sbom,
+      demoPackages
     );
   }
 
@@ -640,7 +644,8 @@ export async function runSupplyChainScan(
     isScanTruncated,
     truncationReason,
     Date.now() - startTime,
-    sbom
+    sbom,
+    finalPackages
   );
 }
 
@@ -661,8 +666,26 @@ function assembleScanResult(
   isScanTruncated: boolean = false,
   truncationReason?: string,
   durationMs: number = 0,
-  sbomCycloneDx?: Record<string, unknown>
+  sbomCycloneDx?: Record<string, unknown>,
+  packagesScanned?: DependencyPackage[]
 ): ScanResult {
+  // Build dependency graph if packages are provided
+  const dependencyGraph = packagesScanned && packagesScanned.length > 0
+    ? buildDependencyGraph({
+        rootName: repoMeta.fullName || repoMeta.repo || 'Target Application',
+        rootVersion: repoMeta.resolvedCommitSha?.slice(0, 7) || repoMeta.defaultBranch || 'main',
+        packages: packagesScanned,
+        findings,
+        manifestPath: manifestsFound[0] || 'package.json',
+      })
+    : undefined;
+
+  // Enrich findings with tri-part evidence (Observed facts, Inferred risks, Unknowns)
+  const enrichedFindings = findings.map((f) => {
+    const detail = enrichFindingWithEvidence(f, dependencyGraph);
+    return detail.finding;
+  });
+
   let criticalCount = 0;
   let highCount = 0;
   let mediumCount = 0;
@@ -675,7 +698,7 @@ function assembleScanResult(
   let exactVersionsResolved = 0;
   let unresolvedRanges = 0;
 
-  for (const f of findings) {
+  for (const f of enrichedFindings) {
     switch (f.severity) {
       case 'critical':
         criticalCount++;
@@ -709,11 +732,11 @@ function assembleScanResult(
 
   // Determine honest scan verdict
   let scanVerdict: ScanStatusVerdict = 'complete_with_findings';
-  if (errors.length > 0 && findings.length === 0) {
+  if (errors.length > 0 && enrichedFindings.length === 0) {
     scanVerdict = 'scan_failed';
   } else if (isAnalysisIncomplete) {
     scanVerdict = 'incomplete_evidence_required';
-  } else if (findings.length === 0) {
+  } else if (enrichedFindings.length === 0) {
     scanVerdict = 'complete_clean';
   } else {
     scanVerdict = 'complete_with_findings';
@@ -744,6 +767,7 @@ function assembleScanResult(
       'Secret Leak Detector',
       'Dockerfile Security Analyzer',
       'CycloneDX SBOM Generator',
+      'Dependency Lineage & Attack Graph Builder',
     ],
     durationMs,
   };
@@ -753,10 +777,10 @@ function assembleScanResult(
     scannedAt: new Date().toISOString(),
     scannerVersion: SCANNER_VERSION,
     scanVerdict,
-    findings,
+    findings: enrichedFindings,
     timeline,
     stats: {
-      totalFindings: findings.length,
+      totalFindings: enrichedFindings.length,
       criticalCount,
       highCount,
       mediumCount,
@@ -778,5 +802,6 @@ function assembleScanResult(
     warnings,
     errors,
     sbomCycloneDx,
+    dependencyGraph,
   };
 }

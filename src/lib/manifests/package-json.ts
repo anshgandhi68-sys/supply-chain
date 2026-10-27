@@ -120,13 +120,34 @@ export function parsePackageLockJson(
 
     // v2/v3 package-lock format
     if (data.packages && typeof data.packages === 'object') {
+      const rootPkg = data.packages[''] || {};
+      const directDepNames = new Set<string>([
+        ...Object.keys(rootPkg.dependencies || {}),
+        ...Object.keys(rootPkg.devDependencies || {}),
+        ...Object.keys(rootPkg.optionalDependencies || {}),
+        ...Object.keys(rootPkg.peerDependencies || {}),
+      ]);
+      const hasRootMetadata = Boolean(rootPkg.dependencies || rootPkg.devDependencies || rootPkg.optionalDependencies);
+
       for (const [key, pkg] of Object.entries<any>(data.packages)) {
         if (!key || key === '') continue; // root project itself
-        const name = pkg.name || key.replace(/^node_modules\//, '');
+        
+        let name = pkg.name;
+        if (!name) {
+          const lastIdx = key.lastIndexOf('node_modules/');
+          name = lastIdx !== -1 ? key.slice(lastIdx + 'node_modules/'.length) : key;
+        }
         const version = pkg.version;
 
         if (name && version && typeof version === 'string') {
-          const isDirect = !key.includes('node_modules/', 13); // shallow node_modules
+          // If root declared dependencies exist in lockfile, determine isDirect strictly from root dependencies.
+          // Otherwise, fall back to checking if key is a shallow node_modules/ path without nested node_modules.
+          const isDirect = hasRootMetadata
+            ? directDepNames.has(name)
+            : !key.includes('node_modules/', 13);
+          const deps = pkg.dependencies && typeof pkg.dependencies === 'object' ? pkg.dependencies : undefined;
+          const isDev = Boolean(pkg.dev);
+
           packages.push({
             name,
             version: version.trim(),
@@ -137,6 +158,9 @@ export function parsePackageLockJson(
             isExactVersion: true,
             specifierType: 'exact',
             resolvedFromLockfile: true,
+            dependencies: deps,
+            dev: isDev,
+            dependencyScope: isDev ? 'development' : 'production',
           });
         }
       }
@@ -146,6 +170,11 @@ export function parsePackageLockJson(
       const traverseV1 = (deps: Record<string, any>, isDirect: boolean = true) => {
         for (const [name, info] of Object.entries(deps)) {
           if (info && typeof info.version === 'string') {
+            const childDeps = info.dependencies && typeof info.dependencies === 'object'
+              ? Object.fromEntries(Object.entries(info.dependencies).map(([k, v]: [string, any]) => [k, v?.version || '*']))
+              : undefined;
+            const isDev = Boolean(info.dev);
+
             packages.push({
               name,
               version: info.version.trim(),
@@ -156,6 +185,9 @@ export function parsePackageLockJson(
               isExactVersion: true,
               specifierType: 'exact',
               resolvedFromLockfile: true,
+              dependencies: childDeps,
+              dev: isDev,
+              dependencyScope: isDev ? 'development' : 'production',
             });
           }
           if (info && info.dependencies && typeof info.dependencies === 'object') {
@@ -250,17 +282,19 @@ export function reconcileWithLockfile(
   lockfilePackages: DependencyPackage[],
   yarnSpecifierMap?: Map<string, string>
 ): DependencyPackage[] {
-  // Build lookup map from lockfile: name -> set of resolved versions
-  const lockfileMap = new Map<string, string[]>();
+  // Build lookup map from lockfile: name -> lockfile package objects
+  const lockfileMap = new Map<string, DependencyPackage[]>();
   for (const lp of lockfilePackages) {
     const existing = lockfileMap.get(lp.name) || [];
-    if (!existing.includes(lp.version)) {
-      existing.push(lp.version);
-    }
+    existing.push(lp);
     lockfileMap.set(lp.name, existing);
   }
 
-  return declaredPackages.map((dp) => {
+  const directNames = new Set<string>();
+
+  const reconciledDirect = declaredPackages.map((dp) => {
+    directNames.add(dp.name);
+
     // If it's a local link or workspace, preserve as-is (not from lockfile)
     if (dp.specifierType === 'local_link' || dp.specifierType === 'workspace') {
       return dp;
@@ -283,17 +317,32 @@ export function reconcileWithLockfile(
     }
 
     // Check package-lock map
-    const lockedVersions = lockfileMap.get(queryName);
-    if (lockedVersions && lockedVersions.length > 0) {
-      // If single locked version, that is the exact installed version
+    const lockedPkgs = lockfileMap.get(queryName);
+    if (lockedPkgs && lockedPkgs.length > 0) {
+      const match = lockedPkgs[0];
       return {
         ...dp,
-        version: lockedVersions[0],
+        version: match.version,
         isExactVersion: true,
         resolvedFromLockfile: true,
+        dependencies: match.dependencies,
+        dependencyScope: dp.dependencyScope || match.dependencyScope,
       };
     }
 
     return dp;
   });
+
+  // Include transitive packages from the lockfile that were not directly declared in package.json
+  const transitivePackages: DependencyPackage[] = [];
+  for (const lp of lockfilePackages) {
+    if (!directNames.has(lp.name)) {
+      transitivePackages.push({
+        ...lp,
+        isDirect: false,
+      });
+    }
+  }
+
+  return [...reconciledDirect, ...transitivePackages];
 }

@@ -64,6 +64,11 @@ export interface Finding {
   cvssScore?: number;
   fixedVersion?: string;
   remediationAdvice?: string;
+  observedFacts?: string[];
+  inferredRisks?: string[];
+  unknowns?: string[];
+  blastRadius?: number;
+  dependencyPath?: string[];
 }
 
 export interface DependencyPackage {
@@ -81,6 +86,8 @@ export interface DependencyPackage {
   purl?: string;
   dependencyScope?: 'production' | 'development' | 'peer' | 'optional';
   parentPackage?: string;
+  dependencies?: Record<string, string>;
+  dev?: boolean;
 }
 
 export interface ParsedManifestResult {
@@ -197,6 +204,76 @@ export interface ScanResult {
   warnings: string[];
   errors: string[];
   sbomCycloneDx?: Record<string, unknown>;
+  dependencyGraph?: DependencyGraphData;
+}
+
+export interface DependencyGraphNode {
+  id: string;
+  name: string;
+  version: string;
+  ecosystem: SupportedEcosystem;
+  isDirect: boolean;
+  isRoot: boolean;
+  manifestPath: string;
+  scope: 'production' | 'development' | 'peer' | 'optional';
+  hasVulnerability: boolean;
+  highestSeverity?: Severity;
+  advisoryCount: number;
+  findings: Finding[];
+  blastRadius: number;
+  parents: string[];
+  children: string[];
+  inAttackPath: boolean;
+  depth: number;
+}
+
+export interface DependencyGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  specifier?: string;
+  isTransitive: boolean;
+  isInAttackPath: boolean;
+}
+
+export interface PlausibleAttackPath {
+  id: string;
+  targetPackage: string;
+  targetVersion: string;
+  severity: Severity;
+  path: string[];
+  advisoryId: string;
+  plausibilityRationale: string;
+  blastRadius: number;
+  cve?: string;
+  scope: 'production' | 'development';
+}
+
+export interface DependencyGraphData {
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+  attackPaths: PlausibleAttackPath[];
+  totalPackages: number;
+  directCount: number;
+  transitiveCount: number;
+  vulnerableCount: number;
+  maxDepth: number;
+}
+
+export interface RemediationDiff {
+  id: string;
+  packageName: string;
+  manifestPath: string;
+  currentVersion: string;
+  proposedVersion: string;
+  severity: Severity;
+  advisoryId: string;
+  breakingRisk: 'low' | 'moderate' | 'high';
+  breakingRationale: string;
+  unifiedDiff: string;
+  beforeSnippet: string;
+  afterSnippet: string;
+  isVerifiedFixed: boolean;
 }
 
 export interface FixVerificationComparison {
@@ -231,3 +308,4 @@ export interface DependencyRemediationProposal {
   isFixedInProposedVersion: boolean;
   rationale: string;
 }
+
