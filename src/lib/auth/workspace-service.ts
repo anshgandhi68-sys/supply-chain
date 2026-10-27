@@ -245,6 +245,18 @@ export async function requireWorkspaceAccess(
 }
 
 /**
+ * Checks whether userRole satisfies minimumRequiredRole according to RBAC hierarchy.
+ */
+export function requireWorkspaceRole(
+  userRole: WorkspaceRole,
+  minimumRequiredRole: WorkspaceRole
+): boolean {
+  const userWeight = ROLE_HIERARCHY[userRole] || 0;
+  const requiredWeight = ROLE_HIERARCHY[minimumRequiredRole] || 1;
+  return userWeight >= requiredWeight;
+}
+
+/**
  * Saves a scan record under the specified workspace after verifying authorization.
  * Strictly guarantees that no tokens, credentials, or full repositories are persisted.
  */

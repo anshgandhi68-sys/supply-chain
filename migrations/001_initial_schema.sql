@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS scans (
     commit_sha VARCHAR(64),
     default_branch VARCHAR(128) NOT NULL DEFAULT 'main',
     scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    scan_verdict VARCHAR(32) NOT NULL CHECK (scan_verdict IN ('CLEAN', 'LOW', 'MODERATE', 'HIGH', 'CRITICAL', 'INCOMPLETE')),
+    scan_verdict VARCHAR(32) NOT NULL CHECK (scan_verdict IN ('CLEAN', 'LOW', 'MODERATE', 'HIGH', 'CRITICAL', 'INCOMPLETE', 'complete_with_findings', 'complete_clean', 'incomplete_evidence_required', 'scan_failed')),
     stats JSONB NOT NULL DEFAULT '{}'::jsonb,
     retention_days INT NOT NULL DEFAULT 30,
     retention_expires_at TIMESTAMPTZ NOT NULL,
@@ -77,15 +77,49 @@ CREATE INDEX IF NOT EXISTS idx_scans_retention_expiry ON scans(retention_expires
 CREATE INDEX IF NOT EXISTS idx_audit_workspace_timestamp ON audit_events(workspace_id, timestamp DESC);
 
 -- ====================================================================
--- ROW-LEVEL SECURITY (RLS) POLICIES (FOR SUPABASE / MANAGED POSTGRES)
+-- ROW-LEVEL SECURITY (RLS) POLICIES (FOR MANAGED POSTGRES / SUPABASE)
 -- ====================================================================
+-- Enable RLS and FORCE RLS so table owners/non-superusers cannot bypass isolation
 ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE scans ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces FORCE ROW LEVEL SECURITY;
 
--- Workspace Isolation Policy (Example for application user mapping)
--- Queries must supply a matching workspace_id filter enforced server-side.
--- In direct Supabase environments:
--- CREATE POLICY workspace_isolation_scans ON scans 
---   USING (workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = auth.uid()));
+ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_members FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE scans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scans FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+
+-- 1. Scans Isolation: Accessible only when app.current_workspace_id matches
+DROP POLICY IF EXISTS scans_tenant_isolation_policy ON scans;
+CREATE POLICY scans_tenant_isolation_policy ON scans
+    AS PERMISSIVE
+    FOR ALL
+    USING (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''))
+    WITH CHECK (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''));
+
+-- 2. Audit Events Isolation: Append-only per tenant
+DROP POLICY IF EXISTS audit_tenant_isolation_policy ON audit_events;
+CREATE POLICY audit_tenant_isolation_policy ON audit_events
+    AS PERMISSIVE
+    FOR ALL
+    USING (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''))
+    WITH CHECK (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''));
+
+-- 3. Workspace Memberships Isolation
+DROP POLICY IF EXISTS members_tenant_isolation_policy ON workspace_members;
+CREATE POLICY members_tenant_isolation_policy ON workspace_members
+    AS PERMISSIVE
+    FOR ALL
+    USING (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''))
+    WITH CHECK (workspace_id = NULLIF(current_setting('app.current_workspace_id', true), ''));
+
+-- 4. Workspaces Table Isolation
+DROP POLICY IF EXISTS workspaces_tenant_isolation_policy ON workspaces;
+CREATE POLICY workspaces_tenant_isolation_policy ON workspaces
+    AS PERMISSIVE
+    FOR ALL
+    USING (id = NULLIF(current_setting('app.current_workspace_id', true), ''))
+    WITH CHECK (id = NULLIF(current_setting('app.current_workspace_id', true), ''));

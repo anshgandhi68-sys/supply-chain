@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
           repository: scanResult.repository?.fullName || body.projectName || 'Manual Scan',
           commitSha: scanResult.repository?.commitSha,
           defaultBranch: scanResult.repository?.defaultBranch,
-          scanVerdict: scanResult.summary?.verdict || 'CLEAN',
+          scanVerdict: scanResult.summary?.verdict || 'complete_clean',
           stats: {
             totalFindings: scanResult.summary?.totalFindings || 0,
             criticalCount: scanResult.summary?.criticalCount || 0,

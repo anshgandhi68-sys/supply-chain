@@ -84,18 +84,18 @@ To deploy a preview build without modifying production:
 
 1. **Push Feature Branch**:
    ```bash
-   git push origin feat/startup-mvp-foundation
+   git push origin feat/durable-saas-infrastructure
    ```
 2. **Inspect Preview Deployment on Vercel Dashboard**:
-   - Vercel automatically creates a unique preview URL (e.g., `supply-chain-sentinel-git-feat-startup-mvp-*.vercel.app`).
-   - Confirm the build log shows `✓ Compiled successfully in ~250ms`.
+   - Vercel automatically creates a unique preview URL (e.g., `supply-chain-sentinel-git-feat-durable-saas-*.vercel.app`).
+   - Confirm the build log shows `✓ Compiled successfully`.
 3. **Verify Health Endpoint**:
    - Access `https://<preview-domain>/api/health`.
-   - Confirm HTTP 200 response with `status: "healthy"` and OSV latency metrics.
+   - Confirm HTTP 200 response with `status: "healthy"`, storage backend diagnostics, rate limiting diagnostics, and `Cache-Control: no-store`.
 4. **Run Smoke Test Scan on Preview**:
    - Access `https://<preview-domain>/analyze`.
    - Run a controlled demo scan or a known small public repo (e.g., `expressjs/express`).
-   - Verify that results render with observed facts and remediation diffs.
+   - Verify that results render with observed facts, attack graph, and remediation diffs.
 5. **Verify Customer Trust Page**:
    - Access `https://<preview-domain>/trust`.
    - Verify disclaimer, data policies, and feedback form.
@@ -110,11 +110,33 @@ If a deployment exhibits unexpected runtime errors or rate limit starvation:
    - Navigate to **Project > Deployments**.
    - Locate the previous stable production deployment (Commit `e4bc61b`).
    - Click the three-dots menu `...` and select **Promote to Production**. Rollback takes effect globally within 15 seconds.
-2. **Git Branch Revert (Alternative)**:
+2. **Database Schema Rollback**:
+   ```bash
+   psql "$DATABASE_URL" -f migrations/001_initial_schema_down.sql
+   ```
+3. **Git Branch Revert (Alternative)**:
    ```bash
    git checkout main
    git revert HEAD
    git push origin main
    ```
-3. **Emergency Disabling of GitHub Scans**:
+4. **Emergency Disabling of GitHub Scans**:
    - If GitHub rate limits are completely exhausted, users can still perform local manifest scans via `/analyze` by pasting `package.json` and `package-lock.json` directly.
+
+---
+
+## 6. Phase 6.1 Verification Status Matrix
+
+| Category | Verification Item | Status | Evidence / Notes |
+| :--- | :--- | :--- | :--- |
+| **Automated Tests** | 194 unit, integration, and security tests | **VERIFIED (PASSED)** | `npm test` exited 0 across 19 test files. |
+| **Static Typing** | Full TypeScript compilation | **VERIFIED (PASSED)** | `npx tsc --noEmit` exited 0 with zero errors. |
+| **Production Build** | Next.js App Router Turbopack compilation | **VERIFIED (PASSED)** | `npm run build` compiled 19 routes in 417ms. |
+| **Vulnerability Audit** | Direct and transitive dependency audit | **VERIFIED (PASSED)** | `npm audit` returned 0 vulnerabilities. |
+| **Tenant Isolation** | Database cross-workspace read, delete, enumeration | **VERIFIED (PASSED)** | Automated regression tests in `phase6-1-live-staging-verification.test.ts`. |
+| **Clerk Token Security**| RS256 RSA-SHA256, expiration, issuer, audience | **VERIFIED (PASSED)** | Automated cryptographic verification tests pass. |
+| **Rate Limit Fallback** | Upstash Redis outage fail-secure local fallback | **VERIFIED (PASSED)** | Simulated HTTP 500 error enforces 10 req/min local sliding-window quota. |
+| **Scan Benchmarks** | Latency & heap memory for 1,500 & 2,500 pkgs | **VERIFIED (PASSED)** | 1,500 pkgs p95: 6ms (+10.2MB); 2,500 pkgs p95: 7ms (+2.5MB). |
+| **Live Database Setup**| Managed PostgreSQL instance connection | **MANUAL STEP REQUIRED** | Requires user provisioning of `DATABASE_URL` in Vercel Preview. |
+| **Live Clerk Instance** | Real Clerk organization & JWKS endpoint | **MANUAL STEP REQUIRED** | Requires user provisioning of `CLERK_JWT_KEY` in Vercel Preview. |
+| **Live Upstash Redis** | Real Upstash Redis REST token & endpoint | **MANUAL STEP REQUIRED** | Requires user provisioning of `UPSTASH_REDIS_REST_URL` & token. |

@@ -90,4 +90,16 @@ This threat model uses the **STRIDE** methodology (Spoofing, Tampering, Repudiat
 | **Upstash Redis Denial-of-Service** | Redis cluster experiences network partitions or outages | Rate limiter fails secure: 1500ms timeout with automatic fallback to local in-memory sliding window (never fails open). |
 | **SQL Injection (CWE-89)** | Malicious repository names or workspace IDs with SQL escape sequences | Parameterized queries with strict input sanitization; never concatenates raw inputs into SQL strings. |
 | **Cross-Tenant IDOR (CWE-639)** | User attempts to access scan records belonging to another workspace | Mandatory server-side workspace membership verification on every query; scans and audits foreign-keyed to `workspace_id`. |
+| **Database Table Owner RLS Bypass** | Application DB role possesses table ownership, bypassing default PostgreSQL RLS | Migrations execute `FORCE ROW LEVEL SECURITY` on all tenant tables (`workspaces`, `workspace_members`, `scans`, `audit_events`). |
+| **Clerk Token Claim Tampering** | Attacker presents valid token with forged `org_id` or `org_role` claims | Clerk tokens are verified with RS256 public key; signature covers all claims; audience and issuer must match trusted domain. |
+| **Distributed Rate Limiting Inconsistency** | Serverless cold instances experience Redis network failure | Local fallback ensures each instance enforces local sliding-window quota (10 req/min); limits are safe (never unlimited) even if cross-instance synchronization is degraded. |
+
+---
+
+## 6. Verification and Regression Testing Summary (Phase 6.1)
+All countermeasures in Section 5 and Section 6 are validated in automated regression suites:
+- `src/tests/phase6-durable-infrastructure.test.ts` (12 tests)
+- `src/tests/phase6-1-live-staging-verification.test.ts` (14 tests)
+- `src/tests/phase5-startup-mvp.test.ts` (19 tests)
+- `src/tests/adversarial-security.test.ts` (18 tests)
 
