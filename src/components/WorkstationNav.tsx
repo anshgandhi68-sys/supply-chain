@@ -20,6 +20,7 @@ export const WorkstationNav: React.FC = () => {
     { label: 'Investigation', href: '/investigate' },
     { label: 'Remediation', href: '/remediation' },
     { label: 'Reports', href: '/reports' },
+    { label: 'Trust & Data', href: '/trust' },
   ];
 
   return (

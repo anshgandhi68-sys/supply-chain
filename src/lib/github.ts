@@ -7,6 +7,9 @@
 
 import { RepositoryMetadata, WorkflowFile, DiscoveredFile } from './types';
 import dns from 'node:dns';
+import { createRequire } from 'node:module';
+
+const requireModule = typeof import.meta.url === 'string' ? createRequire(import.meta.url) : null;
 
 export interface ParsedGitHubUrl {
   owner: string;
@@ -362,6 +365,37 @@ export function parseAndValidateGitHubUrl(rawInput: string): ParsedGitHubUrl {
   }
 }
 
+let cachedSafeAgent: any = null;
+
+export function getSafeAgent(): any {
+  if (!cachedSafeAgent && typeof process !== 'undefined') {
+    try {
+      // Use undici Agent for socket-level DNS interception
+      if (requireModule) {
+        const { Agent } = requireModule('undici');
+        cachedSafeAgent = new Agent({
+        connect: {
+          lookup: (hostname: string, options: any, callback: any) => {
+            dns.lookup(hostname, options, (err: Error | null, address: string, family: number) => {
+              if (err) return callback(err);
+              if (isPrivateOrLocalIp(address)) {
+                return callback(
+                  new Error(`SSRF Blocked: Host '${hostname}' resolved to private/loopback IP address '${address}'.`)
+                );
+              }
+              callback(null, address, family);
+            });
+          },
+        },
+      });
+      }
+    } catch {
+      // Fallback if undici Agent not available
+    }
+  }
+  return cachedSafeAgent;
+}
+
 /**
  * SSRF-Safe Fetch Client
  * Intercepts all redirects manually and verifies that redirect targets remain strictly within
@@ -399,11 +433,17 @@ export async function safeGitHubFetch(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(targetUrl, {
+    const agent = getSafeAgent();
+    const fetchOptions: any = {
       ...init,
       redirect: 'manual', // Never follow redirects automatically without host verification
       signal: init?.signal || controller.signal,
-    });
+    };
+    if (agent && !fetchOptions.dispatcher) {
+      fetchOptions.dispatcher = agent;
+    }
+
+    const response = await fetch(targetUrl, fetchOptions);
     clearTimeout(timeoutId);
 
     // Handle manual redirect verification

@@ -14,7 +14,7 @@ const REDACTION_RULES: RedactionRule[] = [
   // GitHub Personal Access Tokens (classic and fine-grained)
   {
     name: 'github_pat_classic',
-    regex: /\bghp_[a-zA-Z0-9]{36}\b/g,
+    regex: /\bghp_[a-zA-Z0-9]{30,45}\b/g,
     replacement: '[REDACTED_GITHUB_PAT]',
   },
   {
@@ -24,13 +24,18 @@ const REDACTION_RULES: RedactionRule[] = [
   },
   {
     name: 'github_oauth_token',
-    regex: /\bgho_[a-zA-Z0-9]{36}\b/g,
+    regex: /\bgho_[a-zA-Z0-9]{30,45}\b/g,
     replacement: '[REDACTED_GITHUB_OAUTH_TOKEN]',
   },
   {
     name: 'github_app_token',
-    regex: /\b(ghu|ghs)_[a-zA-Z0-9]{36}\b/g,
+    regex: /\b(ghu|ghs)_[a-zA-Z0-9]{30,45}\b/g,
     replacement: '[REDACTED_GITHUB_APP_TOKEN]',
+  },
+  {
+    name: 'url_embedded_auth',
+    regex: /https?:\/\/[a-zA-Z0-9_\-\.%]+:[a-zA-Z0-9_\-\.%]+@/g,
+    replacement: 'https://[REDACTED_CREDENTIALS]@',
   },
   // AWS Access Key ID & Secret Key
   {

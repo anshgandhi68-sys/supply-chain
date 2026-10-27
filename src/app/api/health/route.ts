@@ -51,10 +51,15 @@ export async function GET() {
         hostsAllowed: ['github.com', 'api.github.com', 'raw.githubusercontent.com'],
       },
     },
+    metrics: (await import('@/lib/rate-limiter')).getSystemMetrics(),
     checksDurationMs: Date.now() - startTime,
   };
 
   return NextResponse.json(healthData, {
     status: healthData.status === 'healthy' ? 200 : 503,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache',
+    },
   });
 }
