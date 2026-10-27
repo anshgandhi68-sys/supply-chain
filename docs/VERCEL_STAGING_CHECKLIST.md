@@ -7,7 +7,8 @@
 - **Build Command**: `npm run build`
 - **Output Directory**: `.next`
 - **Production Branch**: `main`
-- **Feature / Preview Branch**: `feat/startup-mvp-foundation`
+- **Production Branch**: `main`
+- **Feature / Preview Branch**: `feat/durable-saas-infrastructure`
 - **Maximum Function Duration**: 30 seconds (Vercel Serverless Function budget for hobby/pro)
 
 ---
@@ -17,14 +18,37 @@
 | Variable Name | Required Scope | Sensitive? | Purpose |
 | :--- | :--- | :--- | :--- |
 | `NODE_ENV` | All | No | `production` / `development` / `test` |
-| `AUTH_PROVIDER` | Preview & Production | No | `local` (default) or `managed` (Clerk/Supabase) |
-| `MANAGED_AUTH_SECRET` | Production Only | **YES** | Shared secret / webhook verification key |
+| `AUTH_PROVIDER` | Preview & Production | No | `clerk`, `managed`, or `local` |
+| `DATABASE_URL` | Production / Staging | **YES** | Managed PostgreSQL connection string (Supabase / Neon / RDS) |
+| `CLERK_SECRET_KEY` | Server-Side Only | **YES** | Clerk secret key for managed authentication |
+| `CLERK_JWT_KEY` | Server-Side Only | **YES** | Clerk RS256 Public Key (PEM) for offline signature verification |
+| `CLERK_ISSUER` | Server-Side Only | No | Expected JWT issuer (e.g., `https://clerk.<app>.accounts.dev`) |
+| `CLERK_AUDIENCE` | Server-Side Only | No | Expected JWT audience or authorized party (`azp`) |
+| `UPSTASH_REDIS_REST_URL`| Production / Staging | **YES** | Upstash Redis REST URL for distributed rate limiting |
+| `UPSTASH_REDIS_REST_TOKEN`| Production / Staging | **YES** | Upstash Redis REST bearer token |
 | `GITHUB_API_TOKEN` | Server-Side Only | **YES** | Optional platform-level fallback token for public repo scans |
-| `UPSTASH_REDIS_REST_URL`| Future Production | **YES** | Distributed rate limiting (when scaling multi-region) |
-| `UPSTASH_REDIS_REST_TOKEN`| Future Production | **YES** | Distributed rate limiting token |
 
 > [!WARNING]  
-> **CRITICAL SECURITY RULE**: Never prefix backend credentials or GitHub tokens with `NEXT_PUBLIC_`. All token-bearing environment variables must remain strictly server-side.
+> **CRITICAL SECURITY RULE**: Never prefix backend credentials, database URLs, or GitHub tokens with `NEXT_PUBLIC_`. All token-bearing environment variables must remain strictly server-side.
+
+---
+
+## 2.1 Database Migration Procedure (PostgreSQL)
+
+Before enabling `DATABASE_URL` in production or staging:
+1. **Apply Initial Schema Migration**:
+   ```bash
+   psql -d "$DATABASE_URL" -f migrations/001_initial_schema.sql
+   ```
+2. **Verify Created Tables & Indexes**:
+   ```bash
+   psql -d "$DATABASE_URL" -c "\dt"
+   # Expected tables: users, workspaces, workspace_members, scans, audit_events
+   ```
+3. **Rollback Script (If Needed)**:
+   ```bash
+   psql -d "$DATABASE_URL" -f migrations/001_initial_schema_down.sql
+   ```
 
 ---
 

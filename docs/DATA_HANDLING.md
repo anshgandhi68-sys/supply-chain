@@ -20,10 +20,10 @@ Supply Chain Sentinel 2.0 is built on the principle of **data minimization** and
 | **Audit Logs** | Yes | Generated on sensitive state changes | Append-only ledger | 90 days |
 
 > [!IMPORTANT]
-> **STORAGE ARCHITECTURE NOTICE (MVP & PREVIEW):**  
-> In the current MVP foundation, workspace scan records and audit logs are managed in type-safe process-local memory designed for local development and private preview demonstrations.
-> In serverless hosting (such as Vercel), serverless functions run statelessly; process memory does **not** persist across cold starts or separate worker instances.
-> **Production persistence requires connecting an external managed database (e.g. PostgreSQL via Supabase / Neon / Prisma) before advancing from Private Preview to General Availability.**
+> **STORAGE ARCHITECTURE & DATABASE INTEGRATION (PHASE 6):**  
+> Sentinel provides durable schema migrations targeting managed PostgreSQL (Supabase, Neon, AWS RDS) defined in `migrations/001_initial_schema.sql` covering `users`, `workspaces`, `workspace_members`, `scans`, and `audit_events`.
+> When `DATABASE_URL` is set, data is stored durably with foreign key constraints, indexes, and active retention pruning.
+> In test environments and unconfigured previews, Sentinel safely defaults to its in-memory repository with explicit `isDurable: false` warnings.
 
 ---
 

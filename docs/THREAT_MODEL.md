@@ -77,3 +77,17 @@ This threat model uses the **STRIDE** methodology (Spoofing, Tampering, Repudiat
 | **DNS Rebinding (TOCTOU)** | Dual-record DNS or low-TTL DNS switching to private IP between resolution and connection | Socket-level lookup hook (`undici.Agent({ connect: { lookup } })`) intercepts the real socket connect address at transport time. |
 | **Redirect to Internal Host** | HTTP 302 redirecting from GitHub to `http://10.0.0.1` | Manual redirect handling with per-hop SSRF validation (`fetchSafeGitHub` validates every redirect target). |
 | **Decimal / Hex IP Encodings** | `http://2130706433` (`127.0.0.1`) | `isPrivateOrBlockedIp()` validates raw integer bitmask and octal representations. |
+
+---
+
+## 5. Distributed Infrastructure & Managed Auth Threat Matrix (Phase 6)
+
+| Threat Vector | Attack Scenario | Countermeasure & Defensive Control |
+| :--- | :--- | :--- |
+| **JWT Algorithm Confusion / 'alg: none'** | Attacker crafts JWT with `"alg": "none"` or swaps RS256 public key as HMAC secret | `verifyManagedAuthToken()` enforces strict algorithm whitelist (`HS256`, `RS256`), rejects `none`, and prevents key type confusion. |
+| **JWT Signature Timing Attack** | Attacker measures cryptographic byte-comparison latency to forge HMAC signatures | Constant-time comparison using `crypto.timingSafeEqual` over fixed-length buffer digests. |
+| **Rate Limit IP Spoofing** | Attacker sends forged `X-Forwarded-For: 1.2.3.4` headers to bypass rate limits | `getClientIdentifier()` prioritizes immutable edge header `X-Real-IP`; only verified auth sessions receive elevated quotas. |
+| **Upstash Redis Denial-of-Service** | Redis cluster experiences network partitions or outages | Rate limiter fails secure: 1500ms timeout with automatic fallback to local in-memory sliding window (never fails open). |
+| **SQL Injection (CWE-89)** | Malicious repository names or workspace IDs with SQL escape sequences | Parameterized queries with strict input sanitization; never concatenates raw inputs into SQL strings. |
+| **Cross-Tenant IDOR (CWE-639)** | User attempts to access scan records belonging to another workspace | Mandatory server-side workspace membership verification on every query; scans and audits foreign-keyed to `workspace_id`. |
+

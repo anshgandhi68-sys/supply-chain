@@ -2,6 +2,11 @@
  * Supply Chain Sentinel 2.0 - Workspace & Authorization Service
  * Enforces server-side authorization, tenant isolation (anti-IDOR),
  * audit trails, and zero-token data retention policies.
+ * 
+ * Supports:
+ * - Managed Clerk authentication (RS256/HS256) with organization role mappings.
+ * - Managed PostgreSQL repository (when DATABASE_URL is set) with fail-safe in-memory store.
+ * - Fail-closed security in deployed environments.
  */
 
 import {
@@ -14,7 +19,9 @@ import {
   AuthContext,
 } from './types';
 import { redactSecrets } from '../redaction';
-import { verifyManagedAuthToken } from './token-verifier';
+import { verifyClerkToken } from './token-verifier';
+import { getDatabaseRepository } from '../db/repository';
+import { DatabaseStatus } from '../db/types';
 
 // Role hierarchy weights
 const ROLE_HIERARCHY: Record<WorkspaceRole, number> = {
@@ -24,20 +31,11 @@ const ROLE_HIERARCHY: Record<WorkspaceRole, number> = {
   owner: 4,
 };
 
-// In-memory data store for local development mode
-// NOTE: Process-local state. In serverless deployments (Vercel), state is ephemeral
-// and does NOT survive across separate serverless instances or cold starts.
-const inMemoryWorkspaces = new Map<string, Workspace>();
-const inMemoryMembers = new Map<string, WorkspaceMember[]>(); // key: workspaceId
-const inMemoryScans = new Map<string, StoredScanRecord[]>(); // key: workspaceId
-const inMemoryAuditLogs: AuditEvent[] = [];
-
-// Seed default development workspace
 const DEV_USER: User = {
   id: 'usr_local_dev',
   email: 'developer@sentinel.local',
   name: 'Local Developer',
-  createdAt: new Date('2026-01-01T00:00:00Z').toISOString(),
+  createdAt: '2026-01-01T00:00:00Z',
 };
 
 const DEV_WORKSPACE: Workspace = {
@@ -45,33 +43,30 @@ const DEV_WORKSPACE: Workspace = {
   name: 'Local Development Workspace',
   slug: 'local-dev',
   tier: 'pilot',
-  createdAt: new Date('2026-01-01T00:00:00Z').toISOString(),
+  createdAt: '2026-01-01T00:00:00Z',
   maxScansPerMonth: 100,
 };
 
-inMemoryWorkspaces.set(DEV_WORKSPACE.id, DEV_WORKSPACE);
-inMemoryMembers.set(DEV_WORKSPACE.id, [
-  {
-    workspaceId: DEV_WORKSPACE.id,
-    userId: DEV_USER.id,
-    role: 'owner',
-    joinedAt: new Date('2026-01-01T00:00:00Z').toISOString(),
-  },
-]);
-inMemoryScans.set(DEV_WORKSPACE.id, []);
+/**
+ * Returns the active storage backend status (PostgreSQL vs In-Memory Preview).
+ */
+export function getStorageStatus(): DatabaseStatus {
+  return getDatabaseRepository().getStatus();
+}
 
 /**
  * Resolves the authenticated context from the HTTP request with strict fail-closed security.
- * - In managed mode (or deployed environments), requires a cryptographically valid JWT Bearer token.
+ * - In managed mode (Clerk), requires a cryptographically valid JWT Bearer token.
  * - Rejects unauthenticated requests safely.
  * - Prevents client-supplied headers from escalating privileges.
  */
 export async function getAuthContext(req?: Request): Promise<AuthContext> {
   const isDeployed = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
   const provider = process.env.AUTH_PROVIDER || (isDeployed ? 'managed' : 'local');
+  const repo = getDatabaseRepository();
 
-  // 1. Managed Provider Flow (Production / Managed Auth)
-  if (provider === 'managed') {
+  // 1. Managed Provider Flow (Clerk / Supabase JWT)
+  if (provider === 'managed' || provider === 'clerk') {
     const authHeader = req?.headers.get('authorization') || '';
     if (!authHeader.startsWith('Bearer ')) {
       return {
@@ -82,18 +77,23 @@ export async function getAuthContext(req?: Request): Promise<AuthContext> {
     }
 
     const token = authHeader.slice(7).trim();
-    const secret = process.env.MANAGED_AUTH_SECRET;
-    if (!secret) {
+    // Accept Clerk JWT Key (PEM) or Secret Key
+    const keyOrSecret =
+      process.env.CLERK_JWT_KEY ||
+      process.env.CLERK_SECRET_KEY ||
+      process.env.MANAGED_AUTH_SECRET;
+
+    if (!keyOrSecret) {
       return {
         isAuthenticated: false,
-        authError: 'Authentication service misconfigured: MANAGED_AUTH_SECRET is not set.',
+        authError: 'Authentication service misconfigured: CLERK_JWT_KEY / CLERK_SECRET_KEY / MANAGED_AUTH_SECRET is not set.',
         isDevelopmentMode: false,
       };
     }
 
-    const verification = verifyManagedAuthToken(token, secret, {
-      issuer: process.env.MANAGED_AUTH_ISSUER,
-      audience: process.env.MANAGED_AUTH_AUDIENCE,
+    const verification = verifyClerkToken(token, keyOrSecret, {
+      issuer: process.env.CLERK_ISSUER || process.env.MANAGED_AUTH_ISSUER,
+      audience: process.env.CLERK_AUDIENCE || process.env.MANAGED_AUTH_AUDIENCE,
     });
 
     if (!verification.valid || !verification.claims) {
@@ -109,34 +109,29 @@ export async function getAuthContext(req?: Request): Promise<AuthContext> {
     const workspaceId = (claims.workspace_id || claims.org_id || `ws_${userId}`) as string;
     const role = (claims.role as WorkspaceRole) || 'analyst';
 
-    let workspace = inMemoryWorkspaces.get(workspaceId);
+    let workspace = await repo.getWorkspace(workspaceId);
     if (!workspace) {
       workspace = {
         id: workspaceId,
-        name: (claims.org_name as string) || `Workspace ${workspaceId}`,
-        slug: workspaceId,
+        name: (claims.org_name as string) || (claims.org_slug as string) || `Workspace ${workspaceId}`,
+        slug: workspaceId.toLowerCase().replace(/[^a-z0-9]/g, '-'),
         tier: 'pilot',
         createdAt: new Date().toISOString(),
         maxScansPerMonth: 100,
       };
-      inMemoryWorkspaces.set(workspaceId, workspace);
-      inMemoryMembers.set(workspaceId, [
-        {
-          workspaceId,
-          userId,
-          role,
-          joinedAt: new Date().toISOString(),
-        },
-      ]);
-      inMemoryScans.set(workspaceId, []);
+      await repo.createWorkspace(workspace);
+      await repo.addWorkspaceMember({
+        workspaceId,
+        userId,
+        role,
+        joinedAt: new Date().toISOString(),
+      });
     }
 
-    const members = inMemoryMembers.get(workspaceId) || [];
-    let member = members.find((m) => m.userId === userId);
+    let member = await repo.getWorkspaceMember(workspaceId, userId);
     if (!member) {
       member = { workspaceId, userId, role, joinedAt: new Date().toISOString() };
-      members.push(member);
-      inMemoryMembers.set(workspaceId, members);
+      await repo.addWorkspaceMember(member);
     }
 
     return {
@@ -170,7 +165,7 @@ export async function getAuthContext(req?: Request): Promise<AuthContext> {
   const workspaceId = customWorkspaceId || DEV_WORKSPACE.id;
   const userId = customUserId || DEV_USER.id;
 
-  const workspace = inMemoryWorkspaces.get(workspaceId);
+  const workspace = await repo.getWorkspace(workspaceId);
   if (!workspace) {
     return {
       isAuthenticated: false,
@@ -179,8 +174,7 @@ export async function getAuthContext(req?: Request): Promise<AuthContext> {
     };
   }
 
-  const members = inMemoryMembers.get(workspaceId) || [];
-  const member = members.find((m) => m.userId === userId);
+  const member = await repo.getWorkspaceMember(workspaceId, userId);
 
   // If client provided a specific userId that does not belong to the workspace, reject
   if (!member && customUserId) {
@@ -225,12 +219,13 @@ export async function requireWorkspaceAccess(
     return { authorized: false, error: 'workspaceId and userId are required.' };
   }
 
-  const members = inMemoryMembers.get(workspaceId);
-  if (!members) {
+  const repo = getDatabaseRepository();
+  const workspace = await repo.getWorkspace(workspaceId);
+  if (!workspace) {
     return { authorized: false, error: 'Workspace not found.' };
   }
 
-  const member = members.find((m) => m.userId === userId);
+  const member = await repo.getWorkspaceMember(workspaceId, userId);
   if (!member) {
     return { authorized: false, error: 'Access denied: user is not a member of this workspace.' };
   }
@@ -300,9 +295,8 @@ export async function saveWorkspaceScan(
     isDemo: Boolean(scanData.isDemo),
   };
 
-  const list = inMemoryScans.get(workspaceId) || [];
-  list.unshift(newRecord);
-  inMemoryScans.set(workspaceId, list);
+  const repo = getDatabaseRepository();
+  await repo.saveScan(newRecord);
 
   // Log audit event
   await logAuditEvent({
@@ -334,16 +328,10 @@ export async function listWorkspaceScans(
     return { success: false, error: auth.error };
   }
 
-  const list = inMemoryScans.get(workspaceId) || [];
-  const now = new Date().toISOString();
+  const repo = getDatabaseRepository();
+  const { scans } = await repo.listScans(workspaceId);
 
-  // Filter out and actively prune records past their retention expiration from storage
-  const activeScans = list.filter((scan) => scan.retentionExpiresAt > now);
-  if (activeScans.length !== list.length) {
-    inMemoryScans.set(workspaceId, activeScans);
-  }
-
-  return { success: true, scans: activeScans };
+  return { success: true, scans };
 }
 
 /**
@@ -359,14 +347,11 @@ export async function deleteWorkspaceScan(
     return { success: false, error: auth.error };
   }
 
-  const list = inMemoryScans.get(workspaceId) || [];
-  const index = list.findIndex((s) => s.id === scanId);
-  if (index === -1) {
+  const repo = getDatabaseRepository();
+  const deleted = await repo.deleteScan(workspaceId, scanId);
+  if (!deleted) {
     return { success: false, error: 'Scan record not found in workspace.' };
   }
-
-  const [deleted] = list.splice(index, 1);
-  inMemoryScans.set(workspaceId, list);
 
   await logAuditEvent({
     workspaceId,
@@ -374,7 +359,7 @@ export async function deleteWorkspaceScan(
     action: 'scan_deleted',
     resourceType: 'scan',
     resourceId: scanId,
-    metadata: { repository: deleted.repository },
+    metadata: { scanId },
   });
 
   return { success: true };
@@ -392,7 +377,8 @@ export async function logAuditEvent(
     timestamp: new Date().toISOString(),
   };
 
-  inMemoryAuditLogs.push(newEvent);
+  const repo = getDatabaseRepository();
+  await repo.recordAuditEvent(newEvent);
 
   // Structured security log
   if (process.env.NODE_ENV !== 'test') {
@@ -424,7 +410,8 @@ export async function listAuditEvents(
     return { success: false, error: auth.error };
   }
 
-  const events = inMemoryAuditLogs.filter((e) => e.workspaceId === workspaceId);
+  const repo = getDatabaseRepository();
+  const { events } = await repo.listAuditEvents(workspaceId);
   return { success: true, events };
 }
 
@@ -445,16 +432,16 @@ export function createTestWorkspace(
     createdAt: new Date().toISOString(),
     maxScansPerMonth: 50,
   };
-  inMemoryWorkspaces.set(workspaceId, ws);
-  inMemoryMembers.set(workspaceId, [
-    {
-      workspaceId,
-      userId: ownerUserId,
-      role,
-      joinedAt: new Date().toISOString(),
-    },
-  ]);
-  inMemoryScans.set(workspaceId, []);
+
+  const repo = getDatabaseRepository();
+  repo.createWorkspace(ws);
+  repo.addWorkspaceMember({
+    workspaceId,
+    userId: ownerUserId,
+    role,
+    joinedAt: new Date().toISOString(),
+  });
+
   return ws;
 }
 
@@ -466,13 +453,11 @@ export function addTestMember(
   userId: string,
   role: WorkspaceRole
 ): void {
-  const members = inMemoryMembers.get(workspaceId) || [];
-  members.push({
+  const repo = getDatabaseRepository();
+  repo.addWorkspaceMember({
     workspaceId,
     userId,
     role,
     joinedAt: new Date().toISOString(),
   });
-  inMemoryMembers.set(workspaceId, members);
 }
-

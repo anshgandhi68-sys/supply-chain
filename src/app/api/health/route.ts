@@ -51,6 +51,8 @@ export async function GET() {
         hostsAllowed: ['github.com', 'api.github.com', 'raw.githubusercontent.com'],
       },
     },
+    storage: (await import('@/lib/auth/workspace-service')).getStorageStatus(),
+    rateLimiting: (await import('@/lib/rate-limiter')).getRateLimiterStatus(),
     metrics: (await import('@/lib/rate-limiter')).getSystemMetrics(),
     checksDurationMs: Date.now() - startTime,
   };

@@ -4,9 +4,9 @@ import { runLocalManifestScan } from '@/lib/manifest-scanner';
 import { readJsonBodyWithLimit } from '@/lib/api-payload';
 import {
   getClientIdentifier,
-  checkRateLimit,
-  acquireConcurrencySlot,
-  releaseConcurrencySlot,
+  checkRateLimitAsync,
+  acquireConcurrencySlotAsync,
+  releaseConcurrencySlotAsync,
   recordScanMetrics,
   generateRequestId,
   logStructuredEvent,
@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
   );
   const policy = client.isAuthenticated ? AUTHENTICATED_POLICY : ANONYMOUS_POLICY;
 
-  // 1. Sliding window rate limit check
-  const rateLimitResult = checkRateLimit(client.id, policy);
+  // 1. Sliding window rate limit check (supports distributed Upstash Redis with local fallback)
+  const rateLimitResult = await checkRateLimitAsync(client.id, policy);
   if (!rateLimitResult.allowed) {
     logStructuredEvent({
       requestId,
@@ -60,8 +60,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Concurrency slot acquisition
-  const slot = acquireConcurrencySlot(client.id, policy.maxConcurrent);
+  // 2. Concurrency slot acquisition (distributed or process-local)
+  const slot = await acquireConcurrencySlotAsync(client.id, policy.maxConcurrent);
   if (!slot.acquired) {
     logStructuredEvent({
       requestId,
@@ -222,6 +222,6 @@ export async function POST(req: NextRequest) {
       }
     );
   } finally {
-    releaseConcurrencySlot(client.id);
+    await releaseConcurrencySlotAsync(client.id);
   }
 }
