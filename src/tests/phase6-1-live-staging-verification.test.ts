@@ -40,6 +40,7 @@ import {
 } from '@/lib/rate-limiter';
 import { parsePackageLockJson } from '@/lib/manifests/package-json';
 import { buildDependencyGraph } from '@/lib/graph';
+import { runLocalManifestScan } from '@/lib/manifest-scanner';
 
 describe('Phase 6.1 — Live Staging Verification & Private Beta Gate', () => {
   // Generate a test 2048-bit RSA key pair for cryptographic verification tests
@@ -529,5 +530,44 @@ describe('Phase 6.1 — Live Staging Verification & Private Beta Gate', () => {
       // 2,500 packages must complete within synchronous threshold (< 4000ms), demonstrating synchronous viability
       expect(p95).toBeLessThan(4000);
     });
+
+    it('measures end-to-end full pipeline scan latency (p50, p95, p99) and failure rate', async () => {
+      const lockContent = fs.readFileSync(
+        path.join(process.cwd(), 'src', 'fixtures', 'sample-package-lock.json'),
+        'utf8'
+      );
+      const runs = 5;
+      const durations: number[] = [];
+      let failures = 0;
+
+      for (let i = 0; i < runs; i++) {
+        const start = performance.now();
+        try {
+          const res = await runLocalManifestScan({
+            packageLockContent: lockContent,
+            projectName: 'benchmark-e2e-real',
+          });
+          if (!res || !res.stats || res.stats.dependenciesScanned === 0) {
+            failures++;
+          }
+        } catch {
+          failures++;
+        }
+        durations.push(performance.now() - start);
+      }
+
+      durations.sort((a, b) => a - b);
+      const p50 = Math.round(durations[Math.floor(runs * 0.5)]);
+      const p95 = Math.round(durations[Math.floor(runs * 0.95)]);
+      const p99 = Math.round(durations[runs - 1]);
+      const failureRate = (failures / runs) * 100;
+
+      console.log(
+        `[Benchmark End-to-End Scan] p50: ${p50}ms | p95: ${p95}ms | p99: ${p99}ms | Failure rate: ${failureRate}%`
+      );
+
+      expect(failures).toBe(0);
+      expect(p95).toBeLessThan(5000); // well within 15s budget
+    }, 15000);
   });
 });
