@@ -49,6 +49,25 @@ export async function GET() {
       githubApi: {
         status: 'configured',
         hostsAllowed: ['github.com', 'api.github.com', 'raw.githubusercontent.com'],
+        fallbackTokenConfigured: Boolean(process.env.GITHUB_API_TOKEN),
+      },
+      clerkAuth: {
+        status: Boolean(process.env.CLERK_SECRET_KEY || process.env.CLERK_JWT_KEY) ? 'configured' : 'unconfigured',
+        provider: process.env.AUTH_PROVIDER || (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL) ? 'managed' : 'local'),
+        hasSecretKey: Boolean(process.env.CLERK_SECRET_KEY),
+        hasJwtPublicKey: Boolean(process.env.CLERK_JWT_KEY),
+        hasCustomIssuer: Boolean(process.env.CLERK_ISSUER),
+        hasCustomAudience: Boolean(process.env.CLERK_AUDIENCE),
+      },
+      upstashRedis: {
+        status: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) ? 'configured' : 'unconfigured',
+        isDistributed: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+        fallbackMode: 'local-sliding-window',
+      },
+      database: {
+        status: (await import('@/lib/auth/workspace-service')).getStorageStatus().connectionState,
+        isDurable: (await import('@/lib/auth/workspace-service')).getStorageStatus().isDurable,
+        backend: (await import('@/lib/auth/workspace-service')).getStorageStatus().backend,
       },
     },
     storage: (await import('@/lib/auth/workspace-service')).getStorageStatus(),

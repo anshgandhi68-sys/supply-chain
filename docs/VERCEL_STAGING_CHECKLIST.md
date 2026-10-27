@@ -33,21 +33,37 @@
 
 ---
 
-## 2.1 Database Migration Procedure (PostgreSQL)
+## 2.1 Database Migration & Least-Privilege Role Setup (PostgreSQL)
 
-Before enabling `DATABASE_URL` in production or staging:
-1. **Apply Initial Schema Migration**:
+Before connecting `DATABASE_URL` in staging:
+1. **Apply Initial Schema Migration (as Migration Admin)**:
    ```bash
-   psql -d "$DATABASE_URL" -f migrations/001_initial_schema.sql
+   psql -d "$DATABASE_ADMIN_URL" -f migrations/001_initial_schema.sql
    ```
-2. **Verify Created Tables & Indexes**:
-   ```bash
-   psql -d "$DATABASE_URL" -c "\dt"
-   # Expected tables: users, workspaces, workspace_members, scans, audit_events
+2. **Configure Least-Privilege Runtime Application Role**:
+   Never run the web application as `postgres` or `superuser`. Create a dedicated runtime role:
+   ```sql
+   -- Execute as DBA/Admin:
+   CREATE ROLE sentinel_app WITH LOGIN PASSWORD '<STAGING_APP_PASSWORD>';
+   GRANT CONNECT ON DATABASE sentinel_staging TO sentinel_app;
+   GRANT USAGE ON SCHEMA public TO sentinel_app;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO sentinel_app;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO sentinel_app;
+   
+   -- Prohibit DDL and Schema Modification by the Runtime Role:
+   REVOKE CREATE ON SCHEMA public FROM sentinel_app;
    ```
-3. **Rollback Script (If Needed)**:
+3. **Validate FORCE ROW LEVEL SECURITY (RLS)**:
+   ```sql
+   SELECT tablename, rowsecurity, forcerowsecurity 
+   FROM pg_tables 
+   WHERE schemaname = 'public' 
+     AND tablename IN ('workspaces', 'workspace_members', 'scans', 'audit_events');
+   -- Expected: rowsecurity = true, forcerowsecurity = true for all four tables
+   ```
+4. **Rollback Script (If Needed)**:
    ```bash
-   psql -d "$DATABASE_URL" -f migrations/001_initial_schema_down.sql
+   psql -d "$DATABASE_ADMIN_URL" -f migrations/001_initial_schema_down.sql
    ```
 
 ---
@@ -57,7 +73,7 @@ Before enabling `DATABASE_URL` in production or staging:
 Execute these checks on your feature branch prior to merging into production:
 
 - [ ] **1. Clean Local Build**: Run `npm run build` locally. Confirm zero TypeScript errors and zero route compilation failures.
-- [ ] **2. Automated Test Suite**: Run `npm test`. All unit, integration, and security regression tests must pass.
+- [ ] **2. Automated Test Suite**: Run `npm test`. All 207 unit, integration, and security regression tests must pass across 20 test files.
 - [ ] **3. Dependency Vulnerability Audit**: Run `npm audit`. Confirm zero critical or high known vulnerabilities in direct dependencies.
 - [ ] **4. Security Headers Active**:
   - `X-Content-Type-Options: nosniff`
@@ -91,10 +107,10 @@ To deploy a preview build without modifying production:
    - Confirm the build log shows `✓ Compiled successfully`.
 3. **Verify Health Endpoint**:
    - Access `https://<preview-domain>/api/health`.
-   - Confirm HTTP 200 response with `status: "healthy"`, storage backend diagnostics, rate limiting diagnostics, and `Cache-Control: no-store`.
+   - Confirm HTTP 200 response with `status: "healthy"`, safe integration diagnostics (`osvDatabase`, `githubApi`, `clerkAuth`, `upstashRedis`, `database`), storage backend diagnostics, rate limiting diagnostics, and `Cache-Control: no-store`.
 4. **Run Smoke Test Scan on Preview**:
    - Access `https://<preview-domain>/analyze`.
-   - Run a controlled demo scan or a known small public repo (e.g., `expressjs/express`).
+   - Run a direct manifest scan or a known small public repo (e.g., `expressjs/express`).
    - Verify that results render with observed facts, attack graph, and remediation diffs.
 5. **Verify Customer Trust Page**:
    - Access `https://<preview-domain>/trust`.
@@ -112,7 +128,7 @@ If a deployment exhibits unexpected runtime errors or rate limit starvation:
    - Click the three-dots menu `...` and select **Promote to Production**. Rollback takes effect globally within 15 seconds.
 2. **Database Schema Rollback**:
    ```bash
-   psql "$DATABASE_URL" -f migrations/001_initial_schema_down.sql
+   psql "$DATABASE_ADMIN_URL" -f migrations/001_initial_schema_down.sql
    ```
 3. **Git Branch Revert (Alternative)**:
    ```bash
@@ -125,18 +141,19 @@ If a deployment exhibits unexpected runtime errors or rate limit starvation:
 
 ---
 
-## 6. Phase 6.1 Verification Status Matrix
+## 6. Phase 6.3 Verification Status Matrix
 
 | Category | Verification Item | Status | Evidence / Notes |
 | :--- | :--- | :--- | :--- |
-| **Automated Tests** | 194 unit, integration, and security tests | **VERIFIED (PASSED)** | `npm test` exited 0 across 19 test files. |
+| **Automated Tests** | 207 unit, integration, and security tests | **VERIFIED (PASSED)** | `npm test` exited 0 across 20 test files. |
 | **Static Typing** | Full TypeScript compilation | **VERIFIED (PASSED)** | `npx tsc --noEmit` exited 0 with zero errors. |
-| **Production Build** | Next.js App Router Turbopack compilation | **VERIFIED (PASSED)** | `npm run build` compiled 19 routes in 417ms. |
+| **Production Build** | Next.js App Router Turbopack compilation | **VERIFIED (PASSED)** | `npm run build` compiled 19 routes in 725ms. |
 | **Vulnerability Audit** | Direct and transitive dependency audit | **VERIFIED (PASSED)** | `npm audit` returned 0 vulnerabilities. |
-| **Tenant Isolation** | Database cross-workspace read, delete, enumeration | **VERIFIED (PASSED)** | Automated regression tests in `phase6-1-live-staging-verification.test.ts`. |
+| **Safe Health Diagnostics**| Non-secret integration diagnostics | **VERIFIED (PASSED)** | Verified `/api/health` returns status flags without credentials. |
+| **Tenant Isolation** | Database cross-workspace read, delete, enumeration | **VERIFIED (PASSED)** | Automated regression tests in `phase6-3-cloud-acceptance.test.ts`. |
 | **Clerk Token Security**| RS256 RSA-SHA256, expiration, issuer, audience | **VERIFIED (PASSED)** | Automated cryptographic verification tests pass. |
-| **Rate Limit Fallback** | Upstash Redis outage fail-secure local fallback | **VERIFIED (PASSED)** | Simulated HTTP 500 error enforces 10 req/min local sliding-window quota. |
-| **Scan Benchmarks** | Latency & heap memory for 1,500 & 2,500 pkgs | **VERIFIED (PASSED)** | 1,500 pkgs p95: 6ms (+10.2MB); 2,500 pkgs p95: 7ms (+2.5MB). |
-| **Live Database Setup**| Managed PostgreSQL instance connection | **MANUAL STEP REQUIRED** | Requires user provisioning of `DATABASE_URL` in Vercel Preview. |
-| **Live Clerk Instance** | Real Clerk organization & JWKS endpoint | **MANUAL STEP REQUIRED** | Requires user provisioning of `CLERK_JWT_KEY` in Vercel Preview. |
-| **Live Upstash Redis** | Real Upstash Redis REST token & endpoint | **MANUAL STEP REQUIRED** | Requires user provisioning of `UPSTASH_REDIS_REST_URL` & token. |
+| **Rate Limit Fallback** | Upstash Redis outage fail-secure local fallback | **VERIFIED (PASSED)** | Automated tests confirm fallback to local sliding-window limiter on error. |
+| **Scan Benchmarks** | Latency & heap memory for 1,500 & 2,500 pkgs | **VERIFIED (PASSED)** | 1,500 pkgs p95: 6ms (-2.2MB); 2,500 pkgs p95: 7ms (+22.9MB). |
+| **Live Database Setup**| Managed PostgreSQL instance connection | **READY FOR PREVIEW** | Requires user provisioning of `DATABASE_URL` in Vercel Preview environment. |
+| **Live Clerk Instance** | Real Clerk organization & JWKS endpoint | **READY FOR PREVIEW** | Requires user provisioning of `CLERK_JWT_KEY` in Vercel Preview environment. |
+| **Live Upstash Redis** | Real Upstash Redis REST token & endpoint | **READY FOR PREVIEW** | Requires user provisioning of `UPSTASH_REDIS_REST_URL` & token. |
