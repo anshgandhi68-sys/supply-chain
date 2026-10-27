@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useScan } from '@/lib/context/ScanContext';
 import { validateJsonInput } from '@/lib/validation';
 import {
@@ -17,11 +18,17 @@ import {
   Layers,
   Terminal,
   FileJson,
+  ExternalLink,
+  GitFork,
+  ShieldCheck,
+  FileText,
+  Wrench,
 } from 'lucide-react';
 
 export default function RepositoryAnalysisPage() {
   const router = useRouter();
-  const { runScan, runDirectManifestScan, isLoading, errorMsg } = useScan();
+  const { runScan, runDirectManifestScan, isLoading, errorMsg, scanResult } = useScan();
+  const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'upload' | 'github' | 'fixtures'>('upload');
 
@@ -131,6 +138,7 @@ export default function RepositoryAnalysisPage() {
 
     if (hasError) return;
 
+    setScanSuccessMsg(null);
     const res = await runDirectManifestScan({
       packageJsonContent: packageJsonText,
       packageLockContent: packageLockText,
@@ -139,22 +147,30 @@ export default function RepositoryAnalysisPage() {
     });
 
     if (res) {
-      router.push('/');
+      setScanSuccessMsg(
+        `Analysis complete! Identified ${res.findings.length} findings across ${res.stats?.dependenciesScanned ?? 0} dependencies.`
+      );
     }
   };
 
   const handleRunGitHubScan = async () => {
     if (!repoUrl.trim()) return;
+    setScanSuccessMsg(null);
     const res = await runScan(repoUrl.trim(), false, githubToken || undefined);
     if (res) {
-      router.push('/');
+      setScanSuccessMsg(
+        `Repository scan complete! Identified ${res.findings.length} findings across ${res.stats?.dependenciesScanned ?? 0} dependencies.`
+      );
     }
   };
 
   const handleRunFixture = async (fixtureId: string) => {
     if (fixtureId === 'demo') {
+      setScanSuccessMsg(null);
       const res = await runScan('demo', true);
-      if (res) router.push('/');
+      if (res) {
+        setScanSuccessMsg(`Risky benchmark loaded! Identified ${res.findings.length} findings.`);
+      }
     }
   };
 
@@ -212,6 +228,25 @@ export default function RepositoryAnalysisPage() {
           <span>Controlled Benchmark Fixtures</span>
         </button>
       </div>
+
+      {/* Success Notification Banner */}
+      {scanSuccessMsg && (
+        <div className="p-4 rounded-xl bg-[#48D9C1]/15 border border-[#48D9C1]/40 text-xs font-mono text-[#48D9C1] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-5 h-5 shrink-0 text-[#48D9C1]" />
+            <span>{scanSuccessMsg}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/"
+              className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[#48D9C1] text-[#07111F] font-bold text-xs hover:bg-[#3ec4ad] transition-colors"
+            >
+              <span>Workstation Overview</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Error Banner */}
       {errorMsg && (
@@ -449,6 +484,89 @@ export default function RepositoryAnalysisPage() {
             >
               Load Clean Standard
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Active Scan Results & Intelligence Dock */}
+      {scanResult && (
+        <div className="mt-8 p-6 rounded-xl bg-[#111F33] border border-[#48D9C1]/40 space-y-5 font-mono shadow-2xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-[rgba(159,190,220,0.16)] gap-4">
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-[#48D9C1] animate-ping" />
+                <span className="text-xs uppercase tracking-wider text-[#48D9C1] font-bold">Active Analysis Results</span>
+              </div>
+              <h2 className="text-lg font-bold text-[#F1F6FC] mt-1">
+                {scanResult.repository?.fullName || 'Analyzed Project'}
+              </h2>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`px-2.5 py-1 rounded text-xs font-bold uppercase ${
+                scanResult.scanVerdict === 'complete_with_findings'
+                  ? 'bg-[#FF647C]/20 text-[#FF647C] border border-[#FF647C]/40'
+                  : 'bg-[#48D9C1]/20 text-[#48D9C1] border border-[#48D9C1]/40'
+              }`}>
+                {scanResult.scanVerdict.replace(/_/g, ' ')}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-3 rounded-lg bg-[#07111F] border border-[rgba(159,190,220,0.1)]">
+              <div className="text-[11px] text-[#9AAEC4]">Dependencies</div>
+              <div className="text-xl font-bold text-[#F1F6FC]">{scanResult.stats?.dependenciesScanned ?? 0}</div>
+            </div>
+            <div className="p-3 rounded-lg bg-[#07111F] border border-[rgba(159,190,220,0.1)]">
+              <div className="text-[11px] text-[#9AAEC4]">Total Findings</div>
+              <div className="text-xl font-bold text-[#FF647C]">{scanResult.stats?.totalFindings ?? 0}</div>
+            </div>
+            <div className="p-3 rounded-lg bg-[#07111F] border border-[rgba(159,190,220,0.1)]">
+              <div className="text-[11px] text-[#9AAEC4]">Critical / High</div>
+              <div className="text-xl font-bold text-[#FF647C]">
+                {(scanResult.stats?.criticalCount ?? 0) + (scanResult.stats?.highCount ?? 0)}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg bg-[#07111F] border border-[rgba(159,190,220,0.1)]">
+              <div className="text-[11px] text-[#9AAEC4]">Plausible Paths</div>
+              <div className="text-xl font-bold text-[#FFC36B]">
+                {scanResult.dependencyGraph?.attackPaths?.length ?? 0}
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <div className="text-xs text-[#9AAEC4] mb-3">Explore Findings & Security Modules:</div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <Link
+                href="/"
+                className="flex items-center justify-center space-x-2 p-2.5 rounded-lg bg-[#17283C] hover:bg-[#1D314A] text-[#F1F6FC] text-xs font-bold border border-[rgba(159,190,220,0.2)] transition-colors"
+              >
+                <span>3D Workstation</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+              <Link
+                href="/graph"
+                className="flex items-center justify-center space-x-2 p-2.5 rounded-lg bg-[#17283C] hover:bg-[#1D314A] text-[#F1F6FC] text-xs font-bold border border-[rgba(159,190,220,0.2)] transition-colors"
+              >
+                <GitFork className="w-3.5 h-3.5 text-[#48D9C1]" />
+                <span>Attack Graph</span>
+              </Link>
+              <Link
+                href="/investigate"
+                className="flex items-center justify-center space-x-2 p-2.5 rounded-lg bg-[#17283C] hover:bg-[#1D314A] text-[#F1F6FC] text-xs font-bold border border-[rgba(159,190,220,0.2)] transition-colors"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#FFC36B]" />
+                <span>Investigation</span>
+              </Link>
+              <Link
+                href="/remediation"
+                className="flex items-center justify-center space-x-2 p-2.5 rounded-lg bg-[#17283C] hover:bg-[#1D314A] text-[#F1F6FC] text-xs font-bold border border-[rgba(159,190,220,0.2)] transition-colors"
+              >
+                <Wrench className="w-3.5 h-3.5 text-[#65BFFF]" />
+                <span>Remediation</span>
+              </Link>
+            </div>
           </div>
         </div>
       )}

@@ -48,7 +48,7 @@ const CHAPTERS = [
 ];
 
 export default function SentinelWorkstationPage() {
-  const { scanResult, loadDemoScan } = useScan();
+  const { scanResult, loadDemoScan, runDirectManifestScan, isLoading } = useScan();
 
   // Local workstation state initialized from global ScanContext if available
   const [scan, setScan] = useState<ScanState>(() => {
@@ -88,6 +88,39 @@ export default function SentinelWorkstationPage() {
     };
   });
 
+  // Synchronize workstation scan state whenever scanResult updates from any page
+  useEffect(() => {
+    if (scanResult && scanResult.repository) {
+      const nodes: ScanState['nodes'] = {};
+      for (const node of scanResult.dependencyGraph?.nodes || []) {
+        if (!node.isRoot) {
+          nodes[node.name] = { v: node.version, direct: node.isDirect, kids: node.children };
+        }
+      }
+      setScan({
+        mode: scanResult.repository.fullName.includes('demo') ? 'demo' : 'live',
+        label: scanResult.repository.fullName || 'Analyzed Application',
+        nodes,
+        findings: scanResult.findings.map((f) => ({
+          id: f.id,
+          sev: f.severity,
+          cat: f.category,
+          pkg: f.observedValue?.split('@')[0] || f.title,
+          v: f.observedValue?.split('@')[1] || 'unknown',
+          fix: f.fixedVersion,
+          path: f.dependencyPath || ['app'],
+          direct: f.dependencyPath ? f.dependencyPath.length <= 2 : true,
+          prod: true,
+        })),
+        lock: !scanResult.isAnalysisIncomplete,
+        partial: Boolean(scanResult.isAnalysisIncomplete),
+      });
+      if (scanResult.findings.length > 0) {
+        setSelectedFindingId(scanResult.findings[0].id);
+      }
+    }
+  }, [scanResult]);
+
   const [activeDialog, setActiveDialog] = useState<string | null>(null);
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>('DEMO-001');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -98,9 +131,46 @@ export default function SentinelWorkstationPage() {
   const [copyFeedback, setCopyFeedback] = useState<string>('Copy contact: studio@sentinel.example');
   const [liveAnnouncement, setLiveAnnouncement] = useState<string>('');
   const [analyzeError, setAnalyzeError] = useState<string>('');
+  const [isSubmittingScan, setIsSubmittingScan] = useState<boolean>(false);
   const [workflowOutput, setWorkflowOutput] = useState<string>('');
-  const [pjContent, setPjContent] = useState<string>('');
-  const [lkContent, setLkContent] = useState<string>('');
+  const [pjContent, setPjContent] = useState<string>(`{
+  "name": "vulnerable-supply-chain-demo",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "0.21.1",
+    "lodash": "4.17.20",
+    "minimist": "1.2.5"
+  }
+}`);
+  const [lkContent, setLkContent] = useState<string>(`{
+  "name": "vulnerable-supply-chain-demo",
+  "version": "1.0.0",
+  "lockfileVersion": 2,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "vulnerable-supply-chain-demo",
+      "version": "1.0.0",
+      "dependencies": {
+        "axios": "0.21.1",
+        "lodash": "4.17.20",
+        "minimist": "1.2.5"
+      }
+    },
+    "node_modules/axios": {
+      "version": "0.21.1",
+      "resolved": "https://registry.npmjs.org/axios/-/axios-0.21.1.tgz"
+    },
+    "node_modules/lodash": {
+      "version": "4.17.20",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz"
+    },
+    "node_modules/minimist": {
+      "version": "1.2.5",
+      "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz"
+    }
+  }
+}`);
   const [wfContent, setWfContent] = useState<string>('');
   const [currentChapter, setCurrentChapter] = useState<number>(0);
   const [scrollProgress, setScrollProgress] = useState<number>(0);
@@ -427,7 +497,8 @@ Static analysis examines declared and resolved manifests without runtime code ex
   };
 
   // Live manifest analyzer
-  const handleAnalyzeManifest = () => {
+  // Live manifest analyzer using real server-side OSV / AST engine
+  const handleAnalyzeManifest = async () => {
     setAnalyzeError('');
     if (!pjContent.trim()) {
       setAnalyzeError('Please provide package.json content.');
@@ -439,59 +510,37 @@ Static analysis examines declared and resolved manifests without runtime code ex
       return;
     }
 
-    let parsedLkPackages: any[] = [];
-    let hasLock = false;
-
     if (lkContent.trim()) {
       const checkLk = validateJsonInput(lkContent, 'package-lock.json');
       if (!checkLk.isValid) {
         setAnalyzeError(checkLk.error || 'Invalid package-lock.json');
         return;
       }
-      const lkParsed = parsePackageLockJson(lkContent, 'package-lock.json');
-      parsedLkPackages = lkParsed.packages;
-      hasLock = parsedLkPackages.length > 0;
     }
 
-    const pjParsed = parsePackageJson(pjContent, 'package.json');
-    const finalPackages = hasLock ? reconcileWithLockfile(pjParsed.packages, parsedLkPackages) : pjParsed.packages;
-
-    const nodes: ScanState['nodes'] = {};
-    for (const pkg of finalPackages) {
-      nodes[pkg.name] = {
-        v: pkg.version,
-        direct: pkg.isDirect,
-        kids: pkg.dependencies ? Object.keys(pkg.dependencies) : [],
-        unv: !hasLock,
-      };
-    }
-
-    const findings: ScanState['findings'] = [];
-    if (!hasLock) {
-      findings.push({
-        id: 'VERSION_UNVERIFIED',
-        sev: 'info',
-        cat: 'dep',
-        pkg: `${finalPackages.length} declared packages`,
-        v: 'ranges only',
-        fix: 'Provide package-lock.json',
-        path: ['app'],
-        direct: true,
-        prod: true,
+    setIsSubmittingScan(true);
+    try {
+      const res = await runDirectManifestScan({
+        packageJsonContent: pjContent,
+        packageLockContent: lkContent.trim() || undefined,
+        projectName: 'Analyzed Application',
       });
+      if (!res) {
+        setAnalyzeError('Analysis failed or returned empty results. Please check manifest syntax.');
+        return;
+      }
+      setLiveAnnouncement(
+        `Scan complete. Found ${res.findings.length} findings across ${res.stats?.dependenciesScanned ?? 0} dependencies.`
+      );
+      // Switch view to overview to display results
+      setActiveDialog('overview');
+    } catch (err: unknown) {
+      setAnalyzeError(err instanceof Error ? err.message : 'An unexpected error occurred during analysis.');
+    } finally {
+      setIsSubmittingScan(false);
     }
-
-    setScan({
-      mode: 'live',
-      label: pjParsed.packages[0]?.name || 'Pasted Manifest',
-      nodes,
-      findings,
-      lock: hasLock,
-      partial: !hasLock,
-    });
-    setSelectedFindingId(findings[0]?.id || null);
-    setActiveDialog('overview');
   };
+
 
   // Workflow unpinned action scanner
   const handleCheckWorkflow = () => {
@@ -841,8 +890,12 @@ Static analysis examines declared and resolved manifests without runtime code ex
                 {analyzeError && <p className="err">{analyzeError}</p>}
 
                 <div className="flex flex-wrap gap-2 mt-2">
-                  <button className="btn" onClick={handleAnalyzeManifest}>
-                    Analyze manifest
+                  <button
+                    className="btn"
+                    onClick={handleAnalyzeManifest}
+                    disabled={isSubmittingScan || isLoading}
+                  >
+                    {isSubmittingScan || isLoading ? 'Analyzing via OSV...' : 'Analyze manifest'}
                   </button>
                   <button
                     className="btn g"
