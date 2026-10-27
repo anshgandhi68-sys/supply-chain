@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runSupplyChainScan } from '@/lib/scanner';
 import { runLocalManifestScan } from '@/lib/manifest-scanner';
+import { readJsonBodyWithLimit } from '@/lib/api-payload';
 
 export async function POST(req: NextRequest) {
   try {
-    // Check Content-Length before full body buffering
-    const contentLength = req.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'Payload too large. Request body exceeds the 5MB limit.' },
-        { status: 413 }
-      );
+    const { data: body, error, status } = await readJsonBodyWithLimit<any>(req);
+    if (error || !body) {
+      return NextResponse.json({ error }, { status: status || 400 });
     }
-
-    const body = await req.json();
 
     // Direct manifest upload / paste mode
     if (body.packageJsonContent || body.packageLockContent || body.manifestContent) {

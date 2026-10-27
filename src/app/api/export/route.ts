@@ -1,20 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ScanResult } from '@/lib/types';
 import { generateMarkdownReport, generateHtmlReport } from '@/lib/reports';
+import { readJsonBodyWithLimit } from '@/lib/api-payload';
 
 export async function POST(req: NextRequest) {
   try {
-    // Check Content-Length before full body buffering
-    const contentLength = req.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'Payload too large. Request body exceeds the 5MB limit.' },
-        { status: 413 }
-      );
+    const { data: body, error, status } = await readJsonBodyWithLimit<{ result: ScanResult; format?: string }>(req);
+    if (error || !body) {
+      return NextResponse.json({ error }, { status: status || 400 });
     }
 
     const { searchParams } = new URL(req.url);
-    const body: { result: ScanResult; format?: string } = await req.json();
     const format = searchParams.get('format') || body?.format || 'json';
 
     if (!body || !body.result) {

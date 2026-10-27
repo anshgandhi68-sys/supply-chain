@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyWorkflowFix, verifyDependencyRemediation } from '@/lib/verifier';
+import { readJsonBodyWithLimit } from '@/lib/api-payload';
 
 export async function POST(req: NextRequest) {
   try {
-    // Check Content-Length before full body buffering
-    const contentLength = req.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'Payload too large. Request body exceeds the 5MB limit.' },
-        { status: 413 }
-      );
+    const { data: body, error, status } = await readJsonBodyWithLimit<any>(req);
+    if (error || !body) {
+      return NextResponse.json({ error }, { status: status || 400 });
     }
-
-    const body = await req.json();
 
     // 1. Dependency Upgrade Verification
     if (body.type === 'dependency' || (body.packageName && body.proposedVersion)) {

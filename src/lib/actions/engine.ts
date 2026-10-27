@@ -289,7 +289,7 @@ export function inspectWorkflow(
           const runScript = step.run;
 
           // Check GHA-004: Potential Script Injection
-          const untrustedContextRegex = /\$\{\{\s*(?:github\.event\.(?:issue|pull_request|comment|review|discussion)\.(?:title|body|head\.ref)|github\.head_ref|github\.event\.head_commit\.message|github\.event\.inputs\.[a-zA-Z0-9_-]+|github\.event\.client_payload\.[a-zA-Z0-9_-]+)\s*\}\}/i;
+          const untrustedContextRegex = /\$\{\{\s*(?:github\.event\.(?:issue|pull_request|comment|review|review_comment|discussion)\.(?:title|body|head\.(?:ref|label))|github\.head_ref|github\.event\.head_commit\.(?:message|author\.name|author\.email)|github\.event\.workflow_run\.(?:head_branch|head_commit\.message)|github\.event\.inputs\.[a-zA-Z0-9_-]+|github\.event\.client_payload\.[a-zA-Z0-9_-]+)\s*\}\}/i;
           const injectionMatch = untrustedContextRegex.exec(runScript);
           if (injectionMatch) {
             const rule = GHA_RULES['GHA-004'];
@@ -314,8 +314,8 @@ export function inspectWorkflow(
             });
           }
 
-          // Check GHA-005: Pipe to shell (curl/wget | sh, bash, python, perl, ruby)
-          const pipeToShellRegex = /(?:curl|wget)\s+[^|\n]+\|\s*(?:sudo\s+)?(?:\/bin\/)?(?:ba|z)?(?:sh|bash|python|python3|perl|ruby)\b/i;
+          // Check GHA-005: Pipe to shell (curl/wget | sh, bash, python, perl, ruby, node, pwsh)
+          const pipeToShellRegex = /(?:curl|wget)\s+[^|\n]+\|\s*(?:sudo(?:\s+-[a-zA-Z0-9]+)*\s+)?(?:\/(?:usr\/(?:local\/)?)?bin\/)?(?:ba|z|da|k)?(?:sh|bash|dash|zsh|ksh|pwsh|python|python3|perl|ruby|node)\b/i;
           const pipeMatch = pipeToShellRegex.exec(runScript);
           if (pipeMatch) {
             const rule = GHA_RULES['GHA-005'];

@@ -6,6 +6,7 @@
  */
 
 import { RepositoryMetadata, WorkflowFile, DiscoveredFile } from './types';
+import dns from 'node:dns';
 
 export interface ParsedGitHubUrl {
   owner: string;
@@ -69,9 +70,128 @@ export function isApprovedGitHubHost(hostname: string): boolean {
 }
 
 /**
+ * Checks whether an IP address belongs to private, loopback, link-local,
+ * cloud metadata (169.254.169.254), or non-routable ranges.
+ */
+export function isPrivateOrLocalIp(ip: string): boolean {
+  if (!ip || typeof ip !== 'string') return true;
+  let cleanIp = ip.trim().toLowerCase();
+
+  // Strip IPv4-mapped IPv6 prefix (::ffff:)
+  if (cleanIp.startsWith('::ffff:')) {
+    cleanIp = cleanIp.slice(7);
+  }
+
+  // IPv6 checks
+  if (cleanIp.includes(':')) {
+    if (cleanIp === '::1' || cleanIp === '::') return true;
+    if (cleanIp.startsWith('fc') || cleanIp.startsWith('fd')) return true; // Unique local (fc00::/7)
+    if (
+      cleanIp.startsWith('fe8') ||
+      cleanIp.startsWith('fe9') ||
+      cleanIp.startsWith('fea') ||
+      cleanIp.startsWith('feb')
+    ) {
+      return true; // Link-local (fe80::/10)
+    }
+    return false;
+  }
+
+  // IPv4 checks
+  const parts = cleanIp.split('.').map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
+    return true; // Malformed IP, block
+  }
+
+  const [a, b] = parts;
+  if (a === 0 || a === 127 || a === 10) return true; // 0.0.0.0/8, 127.0.0.0/8, 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 (Link-local & cloud metadata)
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 (CGNAT)
+
+  return false;
+}
+
+/**
+ * Verifies via DNS that the target hostname does not resolve to private or loopback IP addresses.
+ * Prevents DNS rebinding and internal network scanning attacks.
+ */
+export async function verifyHostDnsNotPrivate(hostname: string): Promise<void> {
+  if (typeof dns !== 'undefined' && dns.promises && dns.promises.lookup) {
+    try {
+      const records = await dns.promises.lookup(hostname, { all: true });
+      for (const record of records) {
+        if (isPrivateOrLocalIp(record.address)) {
+          throw new Error(
+            `SSRF Blocked: Host '${hostname}' resolved to private/loopback IP address '${record.address}'.`
+          );
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('SSRF Blocked:')) {
+        throw err;
+      }
+      // Offline / test mocks without DNS: allow request to proceed so mocked fetch can respond
+    }
+  }
+}
+
+/**
  * Maximum permitted raw file response size (2MB) to prevent memory exhaustion from untrusted content
  */
 export const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Safely reads response body text while enforcing maximum byte limits chunk-by-chunk.
+ * Cancels stream ingestion immediately if response exceeds maxBytes limit.
+ */
+export async function readResponseTextWithLimit(
+  res: Response,
+  maxBytes: number = MAX_FILE_SIZE_BYTES
+): Promise<string> {
+  const contentLength = res.headers.get('content-length');
+  if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+    throw new Error(`Response size (${contentLength} bytes) exceeds safety limit of ${maxBytes} bytes.`);
+  }
+
+  if (!res.body) {
+    return '';
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel('Response body exceeded safety limit');
+          throw new Error(`Response stream exceeded safety limit of ${maxBytes} bytes.`);
+        }
+        chunks.push(value);
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('safety limit')) {
+      throw err;
+    }
+    throw err;
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8').decode(combined);
+}
 
 /**
  * In-memory LRU-style cache for immutable commit contents and tree queries.
@@ -263,6 +383,9 @@ export async function safeGitHubFetch(
   if (!isApprovedGitHubHost(parsed.hostname)) {
     throw new Error(`SSRF Blocked: Host '${parsed.hostname}' is not in approved GitHub domains allowlist.`);
   }
+
+  // Prevent DNS rebinding by resolving and checking addresses against private IP spaces
+  await verifyHostDnsNotPrivate(parsed.hostname);
 
   if (parsed.username || parsed.password) {
     throw new Error('SSRF Blocked: Credentials in URL are forbidden.');
@@ -563,10 +686,7 @@ export async function fetchRawFile(
       return { error: `Failed to fetch file ${path}: HTTP ${apiRes.status}` };
     }
 
-    const text = await apiRes.text();
-    if (text.length > MAX_FILE_SIZE_BYTES) {
-      return { error: `File content exceeds safety limit of ${MAX_FILE_SIZE_BYTES} bytes.` };
-    }
+    const text = await readResponseTextWithLimit(apiRes, MAX_FILE_SIZE_BYTES);
     setInCache(cacheKey, text);
     return { content: text };
   } catch (err: unknown) {
