@@ -4,6 +4,15 @@ import { generateMarkdownReport, generateHtmlReport } from '@/lib/reports';
 
 export async function POST(req: NextRequest) {
   try {
+    // Check Content-Length before full body buffering
+    const contentLength = req.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: 'Payload too large. Request body exceeds the 5MB limit.' },
+        { status: 413 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const body: { result: ScanResult; format?: string } = await req.json();
     const format = searchParams.get('format') || body?.format || 'json';
@@ -51,16 +60,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (format === 'csv') {
+      const safeCsvCell = (val: string | number | undefined | null): string => {
+        if (val === undefined || val === null) return '""';
+        let str = String(val);
+        // Mitigate CSV Formula Injection (DDE)
+        if (/^[=\+\-@\t\r]/.test(str)) {
+          str = `'${str}`;
+        }
+        return `"${str.replace(/"/g, '""')}"`;
+      };
+
       const headers = ['ID', 'Category', 'Severity', 'File', 'Line', 'Title', 'Confidence', 'Status'];
       const rows = result.findings.map((f) => [
-        `"${f.id}"`,
-        `"${f.category}"`,
-        `"${f.severity}"`,
-        `"${f.filePath}"`,
-        `"${f.lineNumber || ''}"`,
-        `"${f.title.replace(/"/g, '""')}"`,
-        `"${f.confidence}"`,
-        `"${f.verificationStatus}"`,
+        safeCsvCell(f.id),
+        safeCsvCell(f.category),
+        safeCsvCell(f.severity),
+        safeCsvCell(f.filePath),
+        safeCsvCell(f.lineNumber),
+        safeCsvCell(f.title),
+        safeCsvCell(f.confidence),
+        safeCsvCell(f.verificationStatus),
       ]);
 
       const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -68,7 +87,7 @@ export async function POST(req: NextRequest) {
       return new NextResponse(csvContent, {
         status: 200,
         headers: {
-          'Content-Type': 'text/csv',
+          'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${result.repository.repo}-security-findings.csv"`,
         },
       });

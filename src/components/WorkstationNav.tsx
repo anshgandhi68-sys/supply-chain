@@ -28,7 +28,7 @@ export const WorkstationNav: React.FC = () => {
       <Link href="/" className="lock">
         <span className="word">SENTINEL</span>
         <svg viewBox="0 0 28 28" fill="none" aria-hidden="true" focusable="false" className="w-6 h-6 sm:w-7 sm:h-7">
-          <path d="M22.2 7.6V24.4H3.6V3.6H17.8" stroke="#11110F" stroke-width="1.2" strokeLinecap="square" strokeLinejoin="miter"/>
+          <path d="M22.2 7.6V24.4H3.6V3.6H17.8" stroke="#11110F" strokeWidth="1.2" strokeLinecap="square" strokeLinejoin="miter"/>
           <rect x="16.6" y="1.9" width="8.4" height="3.2" fill="#B85E3E"/>
         </svg>
       </Link>

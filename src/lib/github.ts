@@ -42,10 +42,26 @@ export const ALLOWED_GITHUB_HOSTS = new Set([
  */
 export function isApprovedGitHubHost(hostname: string): boolean {
   if (!hostname || typeof hostname !== 'string') return false;
-  const lower = hostname.toLowerCase().trim();
+  let lower = hostname.toLowerCase().trim();
 
-  // Explicit check against IP addresses (e.g. 127.0.0.1, 169.254.169.254)
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(lower) || lower.includes(':')) {
+  // Strip enclosing brackets for IPv6 notation e.g. [::1]
+  if (lower.startsWith('[') && lower.endsWith(']')) {
+    lower = lower.slice(1, -1);
+  }
+
+  // Explicit check against IP addresses:
+  // - Standard IPv4 dotted decimal (e.g. 127.0.0.1, 169.254.169.254)
+  // - IPv6 notation (contains colons)
+  // - Pure numeric decimal dword (e.g. 2130706433)
+  // - Hexadecimal IP representations (e.g. 0x7f000001)
+  // - Octal IP representations (e.g. 017700000001)
+  if (
+    /^(\d{1,3}\.){3}\d{1,3}$/.test(lower) ||
+    lower.includes(':') ||
+    /^\d+$/.test(lower) ||
+    /^0x[0-9a-f]+$/i.test(lower) ||
+    /^0[0-7]+$/.test(lower)
+  ) {
     return false;
   }
 
@@ -239,6 +255,10 @@ export async function safeGitHubFetch(
   timeoutMs: number = 10000
 ): Promise<Response> {
   const parsed = new URL(targetUrl);
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`SSRF Blocked: Disallowed protocol '${parsed.protocol}'. Only HTTPS/HTTP permitted.`);
+  }
 
   if (!isApprovedGitHubHost(parsed.hostname)) {
     throw new Error(`SSRF Blocked: Host '${parsed.hostname}' is not in approved GitHub domains allowlist.`);

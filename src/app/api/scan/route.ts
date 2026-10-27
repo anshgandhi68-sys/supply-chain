@@ -4,6 +4,15 @@ import { runLocalManifestScan } from '@/lib/manifest-scanner';
 
 export async function POST(req: NextRequest) {
   try {
+    // Check Content-Length before full body buffering
+    const contentLength = req.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: 'Payload too large. Request body exceeds the 5MB limit.' },
+        { status: 413 }
+      );
+    }
+
     const body = await req.json();
 
     // Direct manifest upload / paste mode
